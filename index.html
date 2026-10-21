@@ -1,0 +1,1591 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<!-- AUHMC deploy version: 2026-10-19-v98 (volunteer) -->
+
+<!-- ====== ANTI-CLICKJACKING (v41) ======
+     Verified against the live server: /api/* responses carry
+     X-Frame-Options but HTML pages do NOT, because static files here are
+     served without .htaccess ever being applied. The page starts HIDDEN
+     and is revealed only if we are the top window. If we are framed we
+     try to break out — and if that is blocked (an attacker can sandbox
+     the frame) the style is never removed and the page stays blank.
+     It fails CLOSED. -->
+<style id="frameGuard">html { display: none !important; }</style>
+<script>
+(function () {
+  var g = document.getElementById('frameGuard');
+  if (window.self === window.top) { if (g) g.remove(); }
+  else { try { window.top.location = window.self.location; } catch (e) {} }
+})();
+</script>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<!-- ====== TAB ICON (v95) ======
+     There was no favicon of any kind on any page, so every tab showed the
+     browser's blank-document glyph -- including the admin panel, which the
+     organiser keeps open all day beside other tabs and could not pick out.
+
+     Two stages on purpose:
+       1. this inline SVG mark, which costs no request and is painted from
+          the first bytes of <head>;
+       2. setFavicon() swaps in the real uploaded conference logo as soon as
+          /api/content answers, and caches its URL in localStorage so the
+          NEXT page load starts with the real logo already in hand.
+     The mark stays as the permanent fallback: the logo is an admin upload
+     and may not exist yet, may be deleted, or may simply be slow. -->
+<link rel="icon" id="favIcon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23002366'/%3E%3Crect x='6' y='6' width='52' height='52' rx='10' fill='none' stroke='%23D4AF37' stroke-width='2' opacity='.55'/%3E%3Cpath d='M27 15h10v12h12v10H37v12H27V37H15V27h12z' fill='%23D4AF37'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23002366'/%3E%3Crect x='6' y='6' width='52' height='52' rx='10' fill='none' stroke='%23D4AF37' stroke-width='2' opacity='.55'/%3E%3Cpath d='M27 15h10v12h12v10H37v12H27V37H15V27h12z' fill='%23D4AF37'/%3E%3C/svg%3E">
+<script>
+  /* Stage 2 of the tab icon (see the comment above the <link> tags).
+     Kept inline and tiny on purpose: it has to run before any stylesheet
+     or script downloads, and every page needs it -- including badge.html
+     and volunteer.html, which load no shared JS file at all. */
+  (function () {
+    var link = document.getElementById('favIcon');
+    /* A URL learned on an earlier visit paints the REAL logo immediately,
+       with no wait for /api/content at all. localStorage is per-origin, so
+       one visit to any page of the site primes every other page. */
+    try {
+      var cached = localStorage.getItem('auhmc_tab_logo');
+      if (cached && link) link.href = cached;
+    } catch (e) { /* private mode / blocked storage -- keep the mark */ }
+
+    /* Called by app.js and admin.js the moment content is in hand. */
+    window.__auhmcSetFavicon = function (url) {
+      /* Same-origin paths only. logo_conference is an admin-editable value
+         and prefixUploadPaths() deliberately leaves absolute URLs intact,
+         so a full http(s) value can legitimately be stored -- pointing the
+         tab icon at a third-party host would hand that host a hit from
+         every single visitor, which is the same reason the hero preload in
+         index.html refuses them. */
+      if (!url || url.charAt(0) !== '/' || url.charAt(1) === '/') return;
+      if (!link) return;
+      if (link.getAttribute('href') === url) return;
+      link.href = url;
+      try { localStorage.setItem('auhmc_tab_logo', url); } catch (e) {}
+    };
+  })();
+</script>
+
+
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#002366">
+<title>تسجيل الحضور — AUHMC 2026</title>
+
+<!-- WHY A SEPARATE PAGE
+     Scanning used to live inside admin.html. Handing that to a volunteer on
+     the door meant handing over the power to delete registrations, edit the
+     whole site, and export every attendee's phone and email. This page can
+     only look people up, record in/out scans, correct a time, and show the
+     volunteer their own scans — and the SERVER enforces that: a volunteer
+     token is rejected by every other endpoint (requireAdmin), so hiding
+     buttons is not the security boundary here, only the courtesy.
+     Designed for a phone held one-handed at a busy door: big targets, big
+     result text readable at arm's length, and loud, unmissable warnings. -->
+
+<!-- Self-hosted (v86) -- was fonts.googleapis.com. -->
+<link rel="stylesheet" href="fonts/fonts.css">
+<!-- Self-hosted (v92) -- was cdnjs.cloudflare.com. Exactly the same reason
+     as the fonts above, and the more urgent half of it: when the font CDN
+     fails the page is ugly, but when THIS one fails every single icon on
+     every page becomes an empty square -- and this panel's buttons are
+     labelled by icon in places. cdnjs is not dependably reachable from
+     inside Syria, which is where every one of this site's users is.
+     vendor/font-awesome/ is the byte-identical Font Awesome 6.5.1 free
+     build: each file was verified against the SRI hash this very tag used
+     to carry before it was downloaded into the repo.
+     integrity/crossorigin are deliberately NOT carried over. SRI exists to
+     catch a third party serving you something else; these are same-origin
+     files the owner uploads by hand, so the hash would guard nothing and
+     would instead break every icon the day someone re-saves the file.
+     ?v=6.5.1 is pinned to the LIBRARY version, not the deploy stamp -- the
+     file never changes between deploys, so tying it to the stamp would
+     re-download 400KB on every upload for nothing. -->
+<link rel="stylesheet" href="vendor/font-awesome/css/all.min.css?v=6.5.1">
+<style>
+  :root{
+    --navy:#002366; --navy-2:#0b3a8f; --gold:#D4AF37;
+    --ink:#151b26; --muted:#5a6478; --line:#e2e6ee; --bg:#eef1f7;
+    --ok:#1f9254; --okbg:#e8f6ee; --warn:#b7791f; --warnbg:#fdf6e3;
+    --bad:#c53030; --badbg:#fdecec; --info:#1d4e94;
+    --radius:16px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{overscroll-behavior-y:contain;}
+  body{margin:0;font-family:'Tajawal',system-ui,sans-serif;background:var(--bg);color:var(--ink);
+       padding-bottom:calc(24px + env(safe-area-inset-bottom));}
+
+  header{background:linear-gradient(135deg,var(--navy) 0%,var(--navy-2) 100%);color:#fff;
+         padding:calc(9px + env(safe-area-inset-top)) 14px 9px;display:flex;
+         align-items:center;justify-content:space-between;gap:10px;
+         position:sticky;top:0;z-index:30;box-shadow:0 2px 14px rgba(0,35,102,.25);}
+  header h1{margin:0;font-size:.92rem;font-weight:800;display:flex;align-items:center;gap:7px;}
+  header h1 i{color:var(--gold);}
+  .who{font-size:.7rem;opacity:.9;text-align:end;line-height:1.5;}
+  .who a{color:#fff;text-decoration:underline;}
+
+  /* Connection state: a bar the volunteer cannot miss, because working
+     offline WITHOUT KNOWING IT is the one failure that loses data. */
+  .netbar{display:none;padding:9px 14px;font-size:.82rem;font-weight:700;
+          align-items:center;gap:8px;justify-content:center;position:sticky;top:52px;z-index:29;}
+  .netbar.show{display:flex;}
+  .netbar--off{background:#7d2020;color:#fff;}
+  .netbar--sync{background:var(--warn);color:#fff;}
+  .netbar--done{background:var(--ok);color:#fff;}
+
+  .wrap{max-width:540px;margin:0 auto;padding:13px;}
+  .card{background:#fff;border-radius:var(--radius);padding:15px;margin-bottom:12px;
+        box-shadow:0 4px 18px rgba(0,35,102,.07);border:1px solid rgba(0,35,102,.05);}
+  h2{font-size:.9rem;margin:0 0 11px;display:flex;align-items:center;gap:8px;color:var(--navy);}
+  h2 i{color:var(--gold);}
+  h2 .h2-extra{margin-inline-start:auto;font-size:.72rem;font-weight:700;}
+
+  label{display:block;font-size:.78rem;font-weight:700;margin-bottom:5px;color:var(--muted);}
+  input,select{width:100%;padding:12px 13px;border:1.5px solid var(--line);border-radius:12px;
+               font-family:inherit;font-size:16px;background:#fff;color:var(--ink);}
+  input:focus,select:focus{outline:none;border-color:var(--navy);box-shadow:0 0 0 3px rgba(0,35,102,.09);}
+  select.needs{border-color:var(--bad);background:#fff7f7;}
+  .row{display:flex;gap:9px;}.row>*{flex:1;min-width:0;}
+
+  .btn{width:100%;padding:14px;border:none;border-radius:13px;font-family:inherit;
+       font-size:1rem;font-weight:800;cursor:pointer;display:flex;align-items:center;
+       justify-content:center;gap:9px;margin-top:9px;transition:filter .15s,transform .1s;}
+  .btn:active{transform:scale(.985);}
+  .btn--primary{background:var(--navy);color:#fff;}
+  .btn--ok{background:var(--ok);color:#fff;}
+  .btn--warn{background:var(--warn);color:#fff;}
+  .btn--gold{background:linear-gradient(135deg,#E3C25A,#D4AF37 55%,#BE9A28);color:#002366;}
+  .btn--ghost{background:#fff;color:var(--navy);border:1.5px solid var(--navy);}
+  .btn--sm{padding:10px;font-size:.88rem;margin-top:7px;}
+  .btn:disabled{opacity:.45;}
+
+  /* position:relative is LOAD-BEARING (v93). The two radios below are
+     position:absolute with no offsets, so without a positioned ancestor
+     here they resolved against something far up the tree and landed
+     outside the page — measured 32px of horizontal scroll on the whole
+     volunteer screen, traced to this one control by bisecting the DOM.
+     The radios are hidden the standard accessible way (clipped to a
+     1px box) rather than just opacity:0, so they stay focusable for a
+     keyboard while taking no space at all. The LABELS are the tap
+     targets and are unaffected. */
+  .dirswitch{display:flex;gap:8px;position:relative;}
+  .dirswitch input{position:absolute;width:1px;height:1px;margin:-1px;padding:0;
+        border:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);
+        white-space:nowrap;opacity:0;pointer-events:none;}
+  .dirswitch label{flex:1;margin:0;padding:13px 8px;border-radius:12px;text-align:center;
+        border:2px solid var(--line);font-size:.95rem;font-weight:800;color:var(--muted);
+        cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:7px;}
+  .dirswitch input:checked + label{border-color:var(--ok);background:var(--okbg);color:var(--ok);}
+  .dirswitch input.out:checked + label{border-color:var(--warn);background:var(--warnbg);color:var(--warn);}
+
+  /* The collapsed setup bar (v93). A full-width button, 52px tall, that
+     reads as a status line rather than a control -- because that is what
+     it mostly is. The direction chip inside carries the same green/amber
+     as the switch it replaces, so the colour the volunteer learned during
+     setup keeps meaning the same thing afterwards. */
+  .fastrow{display:flex;gap:10px;align-items:flex-start;margin:10px 0 0;
+    padding:11px 12px;border:1px solid var(--line);border-radius:12px;background:#fbfcfe;cursor:pointer;}
+  .fastrow input{width:20px;height:20px;flex-shrink:0;margin:1px 0 0;accent-color:var(--gold);}
+  .fastrow span{font-size:.86rem;line-height:1.65;color:var(--muted);}
+  .fastrow strong{color:var(--ink);}
+  .setupbar-fast{flex-shrink:0;border-radius:20px;padding:5px 10px;font-size:.72rem;
+    font-weight:800;background:var(--goldbg,#fdf6e3);color:#8a6d1f;border:1px solid #e6d9a8;}
+  .setupbar[hidden]{display:none;}
+  .setupbar{display:flex;align-items:center;gap:10px;width:100%;
+        min-height:52px;padding:10px 14px;margin-bottom:13px;
+        background:#fff;border:1px solid var(--line);border-radius:var(--radius);
+        box-shadow:0 1px 3px rgba(10,20,45,.06);
+        font-family:inherit;font-size:.95rem;font-weight:700;color:var(--ink);
+        cursor:pointer;text-align:start;}
+  .setupbar:active{background:#f6f8fc;}
+  .setupbar-main{display:flex;align-items:center;gap:8px;flex:1;min-width:0;}
+  .setupbar-main i{color:var(--muted);flex-shrink:0;}
+  .setupbar-main span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .setupbar-dir{flex-shrink:0;border-radius:20px;padding:5px 12px;
+        font-size:.84rem;font-weight:800;}
+  .setupbar-dir.in{background:var(--okbg);color:var(--ok);}
+  .setupbar-dir.out{background:var(--warnbg);color:var(--warn);}
+  .setupbar-edit{color:var(--muted);flex-shrink:0;}
+
+  /* The camera-failure panel (v93). Amber, not red: the volunteer can
+     still work — the name search below is fully functional — so this is a
+     problem to solve, not an emergency. Red here would compete with the
+     red "already scanned" result, which IS the urgent one.
+     [hidden] needs its own rule because this sets display:flex (§9.70). */
+  .camProblem[hidden]{display:none;}
+  .camProblem{display:flex;flex-direction:column;align-items:flex-start;gap:6px;
+        background:#fffaf0;border:1px solid #e2c88a;border-radius:12px;
+        padding:13px 15px;margin-bottom:11px;color:#7a5a12;line-height:1.8;}
+  .camProblem i{font-size:1.2rem;color:#b7791f;}
+  .camProblem strong{font-size:1rem;font-weight:800;}
+  .camProblem span{font-size:.9rem;}
+  .camProblem-retry{align-self:stretch;margin-top:8px;}
+  .camProblem-tag{align-self:flex-start;background:#b7791f;color:#fff;
+        border-radius:20px;padding:3px 11px;font-size:.78rem;font-weight:700;}
+
+  .scanwrap{position:relative;border-radius:13px;overflow:hidden;background:#000;min-height:70px;}
+  #reader{width:100%;}
+  #reader video{display:block;width:100%;}
+  /* Full-frame flash: visible at arm's length in daylight, which a small
+     icon is not. Green = read, red = problem. */
+  .flash{position:absolute;inset:0;pointer-events:none;opacity:0;
+         background:rgba(31,146,84,.55);transition:opacity .12s ease;}
+  .flash.on{opacity:1;transition:none;}
+  .flash--bad{background:rgba(197,48,48,.55);}
+  .scanlock{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+            justify-content:center;gap:8px;background:rgba(6,12,30,.92);color:#fff;
+            text-align:center;padding:18px;font-size:.88rem;font-weight:700;line-height:1.85;}
+  .scanlock i{font-size:1.6rem;color:var(--gold);}
+
+  .result{border-radius:var(--radius);padding:15px;margin-top:11px;display:none;
+          animation:pop .18s ease-out;scroll-margin-top:80px;}
+  @keyframes pop{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
+  .result--ok{background:var(--okbg);border:2px solid var(--ok);}
+  .result--dup{background:var(--warnbg);border:2px solid var(--warn);}
+  .result--bad{background:var(--badbg);border:2px solid var(--bad);}
+  .r-name{font-size:1.45rem;font-weight:900;margin:0 0 4px;line-height:1.25;}
+  .r-badge{font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:.9rem;color:var(--navy);
+           background:rgba(0,35,102,.07);padding:2px 9px;border-radius:20px;display:inline-block;}
+  .r-meta{font-size:.84rem;color:var(--muted);margin-top:6px;line-height:1.7;}
+
+  /* The one element that prevents most wrong scans: a loud statement of
+     what the system already knows about this person today. */
+  .r-state{margin:11px 0 0;padding:11px 12px;border-radius:11px;font-size:.86rem;
+           line-height:1.8;font-weight:700;}
+  .r-state--in{background:rgba(31,146,84,.13);color:#166341;}
+  .r-state--out{background:rgba(183,121,31,.15);color:#7a5210;}
+  .r-state--none{background:rgba(29,78,148,.10);color:var(--info);}
+  .r-state small{display:block;font-weight:500;opacity:.9;margin-top:3px;}
+
+  /* "Did you mean the other direction?" — offered, never silently applied. */
+  .r-suggest{margin-top:9px;padding:11px 12px;border-radius:11px;
+             background:#fff;border:2px dashed var(--warn);font-size:.86rem;line-height:1.8;}
+  .r-suggest b{color:var(--warn);}
+
+  .r-hist{margin-top:10px;font-size:.79rem;color:var(--muted);}
+  .r-hist-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(0,0,0,.06);}
+  .r-hist-row:last-child{border-bottom:none;}
+  .r-hist-row .t{font-family:'IBM Plex Mono',monospace;font-weight:600;color:var(--ink);}
+  .r-hist-row .d{font-weight:700;}
+  .r-hist-row .d.in{color:var(--ok);}.r-hist-row .d.out{color:var(--warn);}
+  .r-hist-row .fix{margin-inline-start:auto;background:none;border:1px solid var(--line);
+                   border-radius:7px;padding:3px 9px;font-size:.72rem;cursor:pointer;
+                   font-family:inherit;color:var(--muted);}
+
+  .hit{display:flex;align-items:center;justify-content:space-between;gap:10px;
+       padding:11px;border:1px solid var(--line);border-radius:12px;margin-bottom:7px;background:#fff;}
+  .hit b{font-size:.98rem;}
+  .hit small{color:var(--muted);font-size:.74rem;display:block;margin-top:3px;line-height:1.6;}
+  .chip{font-size:.67rem;font-weight:800;padding:2px 8px;border-radius:20px;white-space:nowrap;}
+  .chip--in{background:var(--okbg);color:var(--ok);}
+  .chip--out{background:var(--warnbg);color:var(--warn);}
+  .chip--none{background:#eef1f7;color:var(--muted);}
+  .hit .pick{padding:10px 15px;border:none;border-radius:10px;background:var(--navy);
+              color:#fff;font-family:inherit;font-weight:800;cursor:pointer;flex-shrink:0;}
+
+  .mine-row{display:flex;align-items:center;gap:9px;padding:8px 2px;border-bottom:1px solid var(--line);font-size:.84rem;}
+  .mine-row:last-child{border-bottom:none;}
+  .mine-time{font-family:'IBM Plex Mono',monospace;font-size:.76rem;color:var(--muted);flex-shrink:0;}
+  .mine-name{flex:1;min-width:0;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .pill{font-size:.67rem;font-weight:800;padding:3px 9px;border-radius:20px;flex-shrink:0;}
+  .pill--in{background:var(--okbg);color:var(--ok);}
+  .pill--out{background:var(--warnbg);color:var(--warn);}
+  .pill--wait{background:#fdecec;color:var(--bad);}
+
+  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:20px;z-index:60;
+         background:var(--ink);color:#fff;padding:13px 21px;border-radius:30px;
+         font-size:.9rem;font-weight:700;max-width:92vw;text-align:center;display:none;
+         box-shadow:0 8px 26px rgba(0,0,0,.3);}
+  .toast--ok{background:var(--ok);}.toast--bad{background:var(--bad);}
+  .hint{font-size:.78rem;color:var(--muted);line-height:1.75;margin:7px 0 0;}
+  .empty{color:var(--muted);text-align:center;padding:16px 0;font-size:.84rem;}
+
+  .modal{position:fixed;inset:0;background:rgba(6,12,30,.65);z-index:70;display:none;
+         align-items:center;justify-content:center;padding:16px;}
+  .modal.open{display:flex;}
+  .modal-box{background:#fff;border-radius:var(--radius);padding:19px;max-width:410px;width:100%;
+             max-height:90vh;overflow-y:auto;box-shadow:0 20px 50px rgba(0,0,0,.35);}
+  .modal-box h3{margin:0 0 8px;font-size:1.02rem;display:flex;align-items:center;gap:8px;}
+
+  #loginView{max-width:400px;margin:7vh auto;padding:0 16px;}
+  .brand{text-align:center;margin-bottom:15px;color:var(--navy);}
+  .brand .b1{font-weight:900;font-size:1.02rem;}
+  .brand .b2{font-size:.74rem;color:var(--muted);font-family:'IBM Plex Mono',monospace;}
+</style>
+</head>
+<body>
+
+<div id="loginView" style="display:none;">
+  <div class="brand">
+    <div class="b1">المؤتمر العلمي الأول لمشفى حلب الجامعي</div>
+    <div class="b2">AUHMC 2026</div>
+  </div>
+  <div class="card">
+    <h2><i class="fas fa-user-shield"></i> دخول المتطوّعين</h2>
+    <p class="hint" style="margin-top:0;">استخدم الحساب الذي أنشأه لك المشرف.</p>
+    <form id="loginForm">
+      <label for="vEmail">البريد الإلكتروني</label>
+      <input type="email" id="vEmail" dir="ltr" autocomplete="username" required>
+      <label for="vPass" style="margin-top:11px;">كلمة المرور</label>
+      <input type="password" id="vPass" autocomplete="current-password" required>
+      <button type="submit" class="btn btn--primary"><i class="fas fa-right-to-bracket"></i> دخول</button>
+    </form>
+  </div>
+</div>
+
+<div id="appView" style="display:none;">
+  <header>
+    <h1><i class="fas fa-qrcode"></i> تسجيل الحضور</h1>
+    <span class="who"><span id="whoName"></span><br><a href="#" id="logoutLink">خروج</a></span>
+  </header>
+  <div class="netbar" id="netbar"></div>
+
+  <div class="wrap">
+    <!-- ====== SETUP, COLLAPSED ONCE COMPLETE (v93) ======
+         Day, hall and direction are chosen once at the start of a shift and
+         then almost never touched again -- they are even remembered across
+         page reloads. Yet they held the entire top of the screen on every
+         scan, pushing the camera and the result (the two things a volunteer
+         is actually looking at) down the page.
+         Once all three are set this becomes a single line showing what they
+         are, tappable to change. The direction stays IN that line, in its
+         own colour, because scanning "دخول" when you meant "خروج" writes
+         the wrong attendance record and is the one setting worth seeing on
+         every single scan. -->
+    <button type="button" class="setupbar" id="setupBar" hidden>
+      <span class="setupbar-main">
+        <i class="fas fa-location-dot"></i>
+        <span id="setupBarWhere"></span>
+      </span>
+      <span class="setupbar-dir" id="setupBarDir"></span>
+      <span class="setupbar-fast" id="setupBarFast" hidden>سريع</span>
+      <i class="fas fa-pen-to-square setupbar-edit"></i>
+    </button>
+
+    <div class="card" id="setupCard">
+      <h2><i class="fas fa-sliders"></i> إعدادات المسح
+        <span class="h2-extra" id="setupState"></span>
+      </h2>
+      <div class="row" style="margin-bottom:11px;">
+        <div>
+          <label for="ciDay">اليوم <span style="color:var(--bad);">*</span></label>
+          <select id="ciDay"></select>
+        </div>
+        <div>
+          <label for="ciLocation">القاعة <span style="color:var(--bad);">*</span></label>
+          <select id="ciLocation"><option value="">— اختر —</option></select>
+        </div>
+      </div>
+      <label>الاتجاه</label>
+      <div class="dirswitch">
+        <input type="radio" name="dir" id="dirIn" value="in" checked>
+        <label for="dirIn"><i class="fas fa-right-to-bracket"></i> دخول</label>
+        <input type="radio" name="dir" id="dirOut" value="out" class="out">
+        <label for="dirOut"><i class="fas fa-right-from-bracket"></i> خروج</label>
+      </div>
+      <!-- ====== FAST MODE (v98) ======
+           The normal flow is: decode -> GET /checkin/lookup -> show the
+           person -> volunteer taps «تأكيد» -> POST /checkin/record. Two
+           round trips and a tap per badge, which is the right default: the
+           tap is what stops someone being admitted on another person's
+           code, and it is why the two-step exists at all (see §6b).
+
+           It is also the wrong default for a queue of three hundred. Fast
+           mode records on decode in ONE request -- /checkin/record already
+           returns the name, so the identity is still shown, just after the
+           fact instead of before. The safety that is actually lost is
+           small and recoverable: a wrong scan is now undone from the admin
+           panel («حذف المسحات»), which did not exist before this release. -->
+      <label class="fastrow">
+        <input type="checkbox" id="fastMode">
+        <span><strong>مسح سريع</strong> — يسجّل فور قراءة الرمز بلا ضغط «تأكيد».
+          أسرع بكثير للطوابير، ويظهر الاسم بعد التسجيل.</span>
+      </label>
+      <p class="hint">تبقى هذه الإعدادات محفوظة بين كل مسح والذي يليه، وبعد إغلاق الصفحة.</p>
+      <button type="button" class="btn btn--ghost" id="setupDone" hidden>
+        <i class="fas fa-check"></i> تمّ — اطوِ الإعدادات
+      </button>
+    </div>
+
+    <div class="card">
+      <h2><i class="fas fa-camera"></i> المسح بالكاميرا</h2>
+      <!-- v93: the camera's failure explained in place and left on screen,
+           instead of a toast that is gone in three seconds. Hidden until
+           something actually fails. -->
+      <div class="camProblem" id="camProblem" hidden></div>
+      <div class="scanwrap">
+        <div id="reader"></div>
+        <span class="flash" id="flash"></span>
+        <div class="scanlock" id="scanLock">
+          <i class="fas fa-triangle-exclamation"></i>
+          <span>اختر <b>اليوم</b> و<b>القاعة</b> أولًا<br>قبل بدء المسح</span>
+        </div>
+      </div>
+      <button class="btn btn--gold" id="startBtn"><i class="fas fa-play"></i> تشغيل الكاميرا</button>
+      <button class="btn btn--ghost" id="stopBtn" style="display:none;"><i class="fas fa-stop"></i> إيقاف</button>
+
+      <!-- ====== THE WAY IN THAT A SERVER HEADER CANNOT CLOSE (v98) ======
+           The live scanner calls getUserMedia(), which `Permissions-Policy:
+           camera=()` forbids outright — no prompt, nothing the volunteer can
+           do, and nothing the page can work around.
+
+           THIS input is not getUserMedia. `capture="environment"` hands the
+           job to the phone's own camera app and returns a photo as a file,
+           and the camera policy does not govern a file picker. So it keeps
+           working when the live scanner is blocked — which is the whole
+           point: the door must not depend on a hosting setting the organiser
+           may not be able to change tonight.
+
+           It is slower per badge than the live stream (shoot, decode) so it
+           is NOT the default — it is always available, and promoted to the
+           front automatically the moment the policy block is detected. -->
+      <label class="btn btn--ghost" id="photoBtn" for="photoInput">
+        <i class="fas fa-camera-retro"></i> التقاط صورة للرمز
+      </label>
+      <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
+      <!-- scanFile() mounts its working canvas here. Kept out of flow
+           rather than display:none -- a zero-size container makes the
+           library's own sizing maths divide by zero on some versions. -->
+      <div id="photoReader" style="position:absolute;width:0;height:0;overflow:hidden;opacity:0;pointer-events:none;"></div>
+      <div class="result" id="result"></div>
+    </div>
+
+    <div class="card">
+      <h2><i class="fas fa-magnifying-glass"></i> البحث ومعرفة الحالة</h2>
+      <p class="hint" style="margin-top:0;">ابحث عن أي مشارك لترى حالته الآن: داخل أي قاعة، منذ متى،
+        ومن سجّله. لا يهمّ شكل الهمزة ولا التاء المربوطة — «احمد» تجد «أحمد».</p>
+      <input type="search" id="searchBox" placeholder="اكتب حرفين على الأقل من الاسم أو الهاتف">
+      <div id="searchResults" style="margin-top:11px;"></div>
+    </div>
+
+    <div class="card">
+      <h2><i class="fas fa-clock-rotate-left"></i> آخر مسوحاتي
+        <span class="h2-extra" id="mineCount" style="color:var(--muted);"></span>
+      </h2>
+      <div id="mineList"><p class="empty">لا مسوحات بعد.</p></div>
+      <button class="btn btn--ghost btn--sm" id="mineRefresh"><i class="fas fa-sync"></i> تحديث</button>
+    </div>
+  </div>
+</div>
+
+<!-- Missing check-in correction -->
+<div class="modal" id="fixModal">
+  <div class="modal-box">
+    <h3 style="color:var(--bad);"><i class="fas fa-triangle-exclamation"></i> لا يوجد تسجيل دخول</h3>
+    <p class="hint" style="margin-top:0;" id="fixWhy"></p>
+    <label for="fixTime" style="margin-top:11px;">وقت الدخول التقريبي</label>
+    <input type="time" id="fixTime" dir="ltr">
+    <button class="btn btn--ok" id="fixConfirm"><i class="fas fa-check"></i> سجّل الدخول والخروج معًا</button>
+    <button class="btn btn--ghost btn--sm" id="fixCancel">إلغاء</button>
+  </div>
+</div>
+
+<!-- Edit / delete an existing scan -->
+<div class="modal" id="editModal">
+  <div class="modal-box">
+    <h3><i class="fas fa-pen-to-square"></i> تعديل مسحة</h3>
+    <p class="hint" style="margin-top:0;" id="editWhat"></p>
+    <label for="editTime" style="margin-top:11px;">الوقت الصحيح</label>
+    <input type="time" id="editTime" dir="ltr">
+    <button class="btn btn--ok" id="editSave"><i class="fas fa-check"></i> حفظ الوقت</button>
+    <button class="btn btn--ghost btn--sm" id="editDelete" style="color:var(--bad);border-color:var(--bad);">
+      <i class="fas fa-trash-can"></i> حذف هذه المسحة
+    </button>
+    <button class="btn btn--ghost btn--sm" id="editCancel">إلغاء</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Self-hosted (v92) -- was cdnjs.cloudflare.com. This is the scanner,
+     and it is the one that genuinely must not fail: it runs on volunteers'
+     phones at the hospital door, on conference morning, on whatever network
+     the building has that day. If cdnjs is unreachable the camera scanner
+     never initialises and check-in falls back to typing names by hand for
+     every attendee. Verified against the SRI hash this tag used to carry;
+     ?v is the library version, not the deploy stamp (see the icons tag). -->
+<!-- ════════════════════════════════════════════════════════════════
+     ONE LINE TO EDIT, AND IT IS THIS ONE.
+
+     This copy of the scanner is hosted away from the site (GitHub Pages)
+     for exactly one reason: the hospital server appends
+     `Permissions-Policy: camera=()` to every response, which forbids the
+     camera outright, and no file in that account can remove it.
+
+     Everything else stays where it is -- the database, the admin panel,
+     the badges. This page just calls the same API across origins.
+
+     If the site ever moves, change the address below AND the matching
+     SCANNER_ORIGIN in api/index.php. Both ends, or neither: the browser
+     refuses the call if the server does not name this origin back.
+     ════════════════════════════════════════════════════════════════ -->
+<script>window.AUHMC_API = 'https://auh.edu.sy/auhmc/api';</script>
+<script src="vendor/html5-qrcode.min.js?v=2.3.8"></script>
+<script>
+(function () {
+  'use strict';
+  // The directory this page lives in: "" at the domain root, "/auhmc"
+  // under a subdirectory deploy (auh.edu.sy/auhmc/volunteer.html) --
+  // see app.js for the identical logic and why it needs no manual edit
+  // when this file's deployment location changes.
+  var APP_BASE = location.pathname.replace(/\/[^/]*$/, '');
+
+  /* ====== WHERE THE API LIVES (v99) ======
+   * Normally the scanner is served from the same site as the API and this
+   * resolves to "/auhmc/api" -- unchanged behaviour, no configuration.
+   *
+   * It becomes a different value in exactly one situation: the scanner has
+   * been copied to another domain because the hospital's server forbids
+   * the camera with a Permissions-Policy header that no file in that
+   * account can remove. Then this page runs on, say, muqimeen.com while
+   * the data still lives at auh.edu.sy.
+   *
+   * Set it by putting ONE line in the page before this script:
+   *     <script>window.AUHMC_API = 'https://auh.edu.sy/auhmc/api';</script>
+   * and add that same origin to SCANNER_ORIGIN in api/index.php, or the
+   * browser will refuse the cross-origin calls. Both ends, or neither. */
+  var API_ROOT = (typeof window.AUHMC_API === 'string' && window.AUHMC_API)
+    ? window.AUHMC_API.replace(/\/+$/, '')
+    : (APP_BASE + '/api');
+  var TOKEN_KEY = 'auhmc_vol_token';     // separate from the admin panel's key
+  var LOC_KEY   = 'auhmc_vol_location';
+  var DAY_KEY   = 'auhmc_vol_day';
+  var QUEUE_KEY = 'auhmc_vol_queue';     // scans taken while offline
+  var FAST_KEY  = 'auhmc_vol_fast';      // one-request scanning, no confirm tap
+  var $ = function (id) { return document.getElementById(id); };
+  var scanner = null, lastToken = '', lastTokenAt = 0, busy = false;
+  var pending = null, days = [], locations = [], editingId = null;
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function hhmm(v) { return String(v || '').slice(11, 16); }
+  function fmtMin(m) {
+    if (m == null) return '—';
+    var h = Math.floor(m / 60), r = m % 60;
+    return h ? (h + ' س ' + r + ' د') : (r + ' دقيقة');
+  }
+  function toast(msg, kind) {
+    var t = $('toast');
+    t.className = 'toast' + (kind ? ' toast--' + kind : '');
+    t.textContent = msg; t.style.display = 'block';
+    clearTimeout(t._h); t._h = setTimeout(function(){ t.style.display='none'; }, 3400);
+  }
+
+  /* ---- feedback: sight, sound, touch --------------------------------
+   * A door is loud and bright and the phone is at arm's length. One
+   * channel is never enough: the flash covers the whole viewfinder, the
+   * beep carries when nobody is looking at the screen, and the vibration
+   * works when the hall is too loud for the beep. */
+  function flash(ok) {
+    var f = $('flash');
+    f.className = 'flash' + (ok ? '' : ' flash--bad') + ' on';
+    setTimeout(function () { f.className = 'flash' + (ok ? '' : ' flash--bad'); }, 140);
+  }
+  var audioCtx = null;
+  function beep(ok) {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.connect(g); g.connect(audioCtx.destination);
+      o.type = 'sine';
+      o.frequency.value = ok ? 880 : 220;          // high = good, low = problem
+      g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.35, audioCtx.currentTime + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + (ok ? 0.13 : 0.3));
+      o.start(); o.stop(audioCtx.currentTime + (ok ? 0.14 : 0.31));
+    } catch (e) { /* audio blocked — flash and vibration still fire */ }
+  }
+  function buzz(ok) { try { if (navigator.vibrate) navigator.vibrate(ok ? 55 : [45,60,45]); } catch (e) {} }
+  function signal(ok) { flash(ok); beep(ok); buzz(ok); }
+
+  function token() { return localStorage.getItem(TOKEN_KEY); }
+  function direction() { return $('dirOut').checked ? 'out' : 'in'; }
+  function setDirection(d) { $(d === 'out' ? 'dirOut' : 'dirIn').checked = true; }
+
+  function api(method, path, body) {
+    var opt = { method: method, headers: {} };
+    var t = token();
+    if (t) opt.headers['Authorization'] = 'Bearer ' + t;
+    if (body) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
+    return fetch(API_ROOT + path, opt).then(function (r) {
+      if (r.status === 401) { logout(); return { error: 'انتهت الجلسة، سجّل الدخول مجددًا.' }; }
+      return r.json().catch(function () { return { error: 'رد غير مفهوم من الخادم' }; });
+    }).catch(function () { return { error: 'تعذّر الاتصال بالخادم', offline: true }; });
+  }
+
+  function logout() {
+    localStorage.removeItem(TOKEN_KEY);
+    stopCamera();
+    $('appView').style.display = 'none';
+    $('loginView').style.display = '';
+  }
+
+  /* ================= OFFLINE QUEUE =================================
+   * Venue wifi drops. A scan that fails to upload is NOT lost: it is
+   * stored locally WITH THE TIME IT ACTUALLY HAPPENED, shown with a
+   * "waiting" badge, and replayed on reconnect. The server accepts that
+   * original timestamp (bounded), so a dead zone does not collapse a
+   * whole period of scans onto the reconnect moment.
+   *
+   * Stored in localStorage, not memory: a phone that locks, sleeps or
+   * reloads the tab must not drop the queue. */
+  function queue() {
+    try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); } catch (e) { return []; }
+  }
+  function setQueue(q) { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); paintNet(); }
+  function enqueue(payload, label) {
+    var q = queue();
+    q.push({ id: 'q' + Date.now() + Math.random().toString(36).slice(2, 7), payload: payload, label: label });
+    setQueue(q);
+  }
+
+  var flushing = false;
+  function flushQueue(silent) {
+    if (flushing || !queue().length || !navigator.onLine) { paintNet(); return Promise.resolve(); }
+    flushing = true;
+    paintNet('sync');
+    var sent = 0;
+    var run = function () {
+      var list = queue();
+      if (!list.length) return Promise.resolve();
+      var item = list[0];
+      return api('POST', '/checkin/record', item.payload).then(function (r) {
+        if (r && r.offline) return;                  // still no network: stop here
+        /* Any answer from the server — success, duplicate, or refusal — is
+         * a DECIDED outcome. Keeping it queued would replay it forever, so
+         * it leaves the queue either way. */
+        setQueue(queue().filter(function (x) { return x.id !== item.id; }));
+        sent++;
+        return run();
+      });
+    };
+    return run().then(function () {
+      flushing = false;
+      if (!queue().length && sent) {
+        paintNet('done');
+        if (!silent) toast('تم رفع ' + sent + ' مسحة محفوظة', 'ok');
+        setTimeout(function () { paintNet(); }, 3500);
+        loadMine();
+      } else paintNet();
+    });
+  }
+
+  function paintNet(force) {
+    var bar = $('netbar'), n = queue().length;
+    if (force === 'sync') {
+      bar.className = 'netbar netbar--sync show';
+      bar.innerHTML = '<i class="fas fa-arrows-rotate fa-spin"></i> جارٍ رفع المسحات المحفوظة…';
+      return;
+    }
+    if (force === 'done') {
+      bar.className = 'netbar netbar--done show';
+      bar.innerHTML = '<i class="fas fa-check"></i> تم رفع كل المسحات';
+      return;
+    }
+    if (!navigator.onLine) {
+      bar.className = 'netbar netbar--off show';
+      bar.innerHTML = '<i class="fas fa-wifi"></i> لا اتصال — المسح مستمر والمسحات تُحفَظ'
+        + (n ? ' · ' + n + ' بانتظار الرفع' : '');
+      return;
+    }
+    if (n) {
+      bar.className = 'netbar netbar--sync show';
+      bar.innerHTML = '<i class="fas fa-clock"></i> ' + n + ' مسحة بانتظار الرفع &nbsp;'
+        + '<span id="netRetry" style="text-decoration:underline;cursor:pointer;">أعد المحاولة</span>';
+      var rt = $('netRetry');
+      if (rt) rt.addEventListener('click', function () { flushQueue(); });
+      return;
+    }
+    bar.className = 'netbar';
+  }
+  window.addEventListener('online',  function () { toast('عاد الاتصال', 'ok'); flushQueue(); });
+  window.addEventListener('offline', function () { toast('انقطع الاتصال — المسح مستمر', 'bad'); paintNet(); });
+
+  /* ================= SETTINGS GATE ================================
+   * A scan recorded against the wrong hall — or worse against NO hall,
+   * because the volunteer never opened the settings — is silently wrong
+   * data that nobody notices until the reports are built. So the camera
+   * does not start at all until both are chosen. */
+  function settingsReady() { return !!$('ciDay').value && !!$('ciLocation').value; }
+  function paintGate() {
+    var ok = settingsReady();
+    $('scanLock').style.display = ok ? 'none' : '';
+    $('startBtn').disabled = !ok;
+    $('ciDay').classList.toggle('needs', !$('ciDay').value);
+    $('ciLocation').classList.toggle('needs', !$('ciLocation').value);
+    $('setupState').textContent = ok ? ($('ciLocation').value + ' · ' + $('ciDay').value) : 'غير مكتملة';
+    $('setupState').style.color = ok ? 'var(--ok)' : 'var(--bad)';
+
+    /* ---- NO HALLS DEFINED AT ALL (v93) ----
+       Previously the lock just said "choose the day and hall first" even
+       when the hall list was empty -- a dead end: the volunteer is told to
+       pick something that does not exist, with no hint that only the
+       organiser can fix it. */
+    var noHalls = $('ciLocation').options.length <= 1;
+    var lockMsg = $('scanLock').querySelector('span, p, div') || $('scanLock');
+    if (noHalls) {
+      lockMsg.innerHTML = 'لا توجد قاعات مُعرَّفة بعد.<br>اطلب من المنظّم إضافتها من لوحة التحكم ← الحضور والمتطوّعون.';
+    }
+
+    /* ---- Collapse the setup once it is complete (v93) ---- */
+    $('setupDone').hidden = !ok;
+    if (ok && _setupCollapsed) showSetupBar(); else hideSetupBar();
+
+    if (!ok) stopCamera();
+  }
+
+  /* Collapsed by default on load WHEN the settings are already remembered
+     from a previous shift -- the common case, since they are stored in
+     localStorage. A volunteer opening this for the first time sees the
+     full card and nothing is hidden from them. */
+  var _setupCollapsed = false;
+  function showSetupBar() {
+    var dirOut = $('dirOut').checked;
+    $('setupBarWhere').textContent = $('ciLocation').value + ' · ' + $('ciDay').value;
+    var chip = $('setupBarDir');
+    chip.textContent = dirOut ? 'خروج' : 'دخول';
+    chip.className = 'setupbar-dir ' + (dirOut ? 'out' : 'in');
+    /* Fast mode records without a confirmation tap, so it must never be on
+       invisibly -- the collapsed bar is all a volunteer sees for most of a
+       shift, and "why did it not ask me?" is a bad thing to discover at a
+       door. */
+    var fastChip = $('setupBarFast');
+    if (fastChip) fastChip.hidden = !($('fastMode') && $('fastMode').checked);
+    $('setupBar').hidden = false;
+    $('setupCard').hidden = true;
+  }
+  function hideSetupBar() {
+    $('setupBar').hidden = true;
+    $('setupCard').hidden = false;
+  }
+
+  $('setupDone').addEventListener('click', function () {
+    _setupCollapsed = true;
+    paintGate();
+  });
+  $('setupBar').addEventListener('click', function () {
+    _setupCollapsed = false;
+    paintGate();
+    $('ciDay').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+  // Changing the direction while collapsed must repaint the chip.
+  $('dirIn').addEventListener('change', function () { if (_setupCollapsed) showSetupBar(); });
+  $('dirOut').addEventListener('change', function () { if (_setupCollapsed) showSetupBar(); });
+
+  // ---- login -------------------------------------------------------
+  $('loginForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var btn = e.target.querySelector('button');
+    btn.disabled = true;
+    fetch(APP_BASE + '/api/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: $('vEmail').value.trim(), password: $('vPass').value })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      btn.disabled = false;
+      if (d.error || !d.token) { toast(d.error || 'فشل الدخول', 'bad'); return; }
+      localStorage.setItem(TOKEN_KEY, d.token);
+      $('vPass').value = '';
+      start(d.user);
+    }).catch(function () { btn.disabled = false; toast('تعذّر الاتصال', 'bad'); });
+  });
+  $('logoutLink').addEventListener('click', function (e) { e.preventDefault(); logout(); });
+
+  // ---- day + hall --------------------------------------------------
+  function fillDays(list) {
+    days = (list && list.length) ? list : [];
+    var sel = $('ciDay'), saved = localStorage.getItem(DAY_KEY);
+    var today = new Date().toISOString().slice(0, 10);
+    sel.innerHTML = '<option value="">— اختر —</option>' + days.map(function (d) {
+      return '<option value="' + esc(d) + '">' + esc(d) + '</option>';
+    }).join('');
+    if (days.indexOf(today) !== -1) sel.value = today;
+    else if (saved && days.indexOf(saved) !== -1) sel.value = saved;
+    paintGate();
+  }
+  function fillLocations(list) {
+    locations = list || [];
+    var sel = $('ciLocation'), saved = localStorage.getItem(LOC_KEY);
+    if (!locations.length) {
+      sel.innerHTML = '<option value="">لا قاعات مُعرَّفة — راجع المشرف</option>';
+      paintGate(); return;
+    }
+    sel.innerHTML = '<option value="">— اختر —</option>' + locations.map(function (l) {
+      return '<option value="' + esc(l) + '">' + esc(l) + '</option>';
+    }).join('');
+    // A volunteer stands in ONE hall all day. Remembering the choice means
+    // a locked phone does not cost a re-selection — or worse, a wrong hall
+    // silently attached to the next fifty scans.
+    if (saved && locations.indexOf(saved) !== -1) sel.value = saved;
+    paintGate();
+  }
+  $('ciLocation').addEventListener('change', function () { localStorage.setItem(LOC_KEY, this.value); paintGate(); });
+  $('ciDay').addEventListener('change', function () { localStorage.setItem(DAY_KEY, this.value); paintGate(); });
+  (function () {
+    var fm = $('fastMode');
+    if (!fm) return;
+    // Remembered like the day and the hall: a volunteer sets their shift up
+    // once, and a dropped connection or a locked phone must not quietly put
+    // them back into the slower flow mid-queue.
+    try { fm.checked = localStorage.getItem(FAST_KEY) === '1'; } catch (e) {}
+    fm.addEventListener('change', function () {
+      try { localStorage.setItem(FAST_KEY, this.checked ? '1' : '0'); } catch (e) {}
+      toast(this.checked ? 'المسح السريع مفعَّل — يسجّل بلا تأكيد' : 'عاد التأكيد قبل التسجيل', 'ok');
+      paintGate();
+    });
+  })();
+  Array.prototype.forEach.call(document.querySelectorAll('input[name="dir"]'), function (r) {
+    // Flipping the direction re-renders the open result, so the warning and
+    // the confirm button always describe what will actually happen.
+    r.addEventListener('change', function () { if (pending && pending._raw) renderResult(pending._raw); });
+  });
+
+  // ---- result ------------------------------------------------------
+  function renderResult(p) {
+    var box = $('result');
+    box.style.display = 'block';
+    if (p.error) {
+      box.className = 'result result--bad';
+      box.innerHTML = '<p class="r-name"><i class="fas fa-circle-xmark"></i> ' + esc(p.error) + '</p>';
+      pending = null;
+      return;
+    }
+    var r = p.registration;
+    var day = $('ciDay').value;
+    var hist = (p.history || []).filter(function (h) { return h.conf_day === day; });
+    var dir = direction();
+
+    // Replay the day to find the open session and who opened it.
+    var open = null;
+    hist.forEach(function (h) { open = (h.direction === 'in') ? h : null; });
+
+    var state, suggest = '';
+    if (open) {
+      var mins = Math.max(0, Math.round((Date.now() - Date.parse(String(open.scanned_at).replace(' ', 'T'))) / 60000));
+      state = '<div class="r-state r-state--in"><i class="fas fa-circle-check"></i> '
+        + 'داخل القاعة الآن منذ ' + esc(hhmm(open.scanned_at)) + ' (' + fmtMin(mins) + ')'
+        + '<small>' + (open.location ? 'القاعة: ' + esc(open.location) + ' · ' : '')
+        + 'سجّله: ' + esc(open.scanned_by || '—') + '</small></div>';
+      if (dir === 'in') {
+        suggest = '<div class="r-suggest"><i class="fas fa-lightbulb"></i> '
+          + 'هذا الشخص <b>مسجَّل دخولًا مسبقًا</b> ولم يخرج بعد.<br>هل تقصد تسجيل <b>خروج</b>؟'
+          + '<button class="btn btn--warn btn--sm" id="swapDir">'
+          + '<i class="fas fa-right-from-bracket"></i> نعم، سجّل خروجًا</button></div>';
+      }
+    } else if (hist.length) {
+      var last = hist[hist.length - 1];
+      var sessions = hist.filter(function (h) { return h.direction === 'in'; }).length;
+      state = '<div class="r-state r-state--out"><i class="fas fa-right-from-bracket"></i> '
+        + 'خرج آخر مرة الساعة ' + esc(hhmm(last.scanned_at))
+        + '<small>' + sessions + ' جلسة اليوم'
+        + (last.location ? ' · آخر قاعة: ' + esc(last.location) : '')
+        + ' · سجّله: ' + esc(last.scanned_by || '—') + '</small></div>';
+      if (dir === 'out') {
+        suggest = '<div class="r-suggest"><i class="fas fa-lightbulb"></i> '
+          + 'هذا الشخص <b>خارج القاعة</b> حاليًّا.<br>هل تقصد تسجيل <b>دخول</b>؟'
+          + '<button class="btn btn--ok btn--sm" id="swapDir">'
+          + '<i class="fas fa-right-to-bracket"></i> نعم، سجّل دخولًا</button></div>';
+      }
+    } else {
+      state = '<div class="r-state r-state--none"><i class="fas fa-circle-info"></i> '
+        + 'لم يُسجَّل له أي دخول اليوم</div>';
+      if (dir === 'out') {
+        suggest = '<div class="r-suggest"><i class="fas fa-lightbulb"></i> '
+          + 'لا يوجد تسجيل دخول لهذا الشخص اليوم.<br>هل تقصد تسجيل <b>دخول</b>؟'
+          + '<button class="btn btn--ok btn--sm" id="swapDir">'
+          + '<i class="fas fa-right-to-bracket"></i> نعم، سجّل دخولًا</button>'
+          + '<p class="hint" style="margin-bottom:0;">أو تابع الخروج، وسيُطلب منك وقت الدخول.</p></div>';
+      }
+    }
+
+    var histHtml = !hist.length ? '' : '<div class="r-hist">' + hist.slice(-6).map(function (h) {
+      return '<div class="r-hist-row">'
+        + '<span class="d ' + (h.direction === 'out' ? 'out' : 'in') + '">'
+        + (h.direction === 'out' ? '↤ خروج' : '↦ دخول') + '</span>'
+        + '<span class="t">' + esc(hhmm(h.scanned_at)) + '</span>'
+        + (h.location ? '<span>' + esc(h.location) + '</span>' : '')
+        + (h.id ? '<button class="fix" data-fix="' + esc(h.id) + '" data-t="' + esc(hhmm(h.scanned_at))
+            + '" data-d="' + esc(h.direction) + '">تعديل</button>' : '')
+        + '</div>';
+    }).join('') + '</div>';
+
+    box.className = 'result ' + (suggest ? 'result--dup' : 'result--ok');
+    box.innerHTML =
+      '<p class="r-name">' + esc(r.name) + '</p>' +
+      (r.badgeNo ? '<span class="r-badge">' + esc(r.badgeNo) + '</span>' : '') +
+      '<p class="r-meta">' + esc(r.professionalRole || r.specialty || '') +
+        (r.workplace ? ' · ' + esc(r.workplace) : '') + '</p>' +
+      state + suggest + histHtml +
+      '<button class="btn ' + (dir === 'out' ? 'btn--warn' : 'btn--ok') + '" id="confirmBtn">'
+      + '<i class="fas fa-check"></i> تأكيد ' + (dir === 'out' ? 'الخروج' : 'الدخول') + '</button>';
+
+    pending = { token: p._token || '', id: r.id, name: r.name, _raw: p };
+
+    $('confirmBtn').addEventListener('click', function () { confirmScan(''); });
+    var sw = $('swapDir');
+    if (sw) sw.addEventListener('click', function () { setDirection(dir === 'in' ? 'out' : 'in'); renderResult(p); });
+    Array.prototype.forEach.call(box.querySelectorAll('[data-fix]'), function (b) {
+      b.addEventListener('click', function () {
+        openEdit(b.getAttribute('data-fix'), b.getAttribute('data-t'), b.getAttribute('data-d'));
+      });
+    });
+
+    // Bring the confirm button into view: on a phone the result lands below
+    // the viewfinder, and the volunteer would otherwise scroll for it on
+    // every single person.
+    setTimeout(function () { box.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 60);
+  }
+
+  function fastModeOn() { var el = $('fastMode'); return !!(el && el.checked); }
+
+  /* ====== ONE REQUEST PER BADGE (v98) ======
+   * Records straight from the decoded token, with no lookup first and no
+   * confirm tap. /checkin/record already returns the person's name, the
+   * session length and whether it was a duplicate -- everything the
+   * confirmation panel shows -- so the identity is still displayed, just
+   * after the write instead of before it.
+   *
+   * Everything that protects a scan still applies, because it all lives on
+   * the SERVER: the 90-second duplicate guard, the per-registration row
+   * lock, the open-session pairing. Fast mode skips the human check, not
+   * the machine ones.
+   *
+   * `needsManualIn` (an exit with no matching entry) still has to stop and
+   * ask, so that one case falls back to the normal dialog. */
+  function fastRecord(tok) {
+    if (busy) return;
+    if (!settingsReady()) { toast('اختر اليوم والقاعة أولًا', 'bad'); return; }
+    busy = true;
+    var payload = {
+      token: tok, registration_id: 0,
+      conf_day: $('ciDay').value,
+      direction: direction(),
+      location: $('ciLocation').value,
+      activity: '', manual_in_time: '',
+      scanned_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      method: 'qr'
+    };
+    api('POST', '/checkin/record', payload).then(function (r) {
+      busy = false;
+      if (r && r.offline) {
+        // The queue already replays these, so a dead network costs nothing
+        // but a later upload -- the volunteer keeps scanning.
+        enqueue(payload, 'مسح سريع · ' + (payload.direction === 'out' ? 'خروج' : 'دخول'));
+        signal(true);
+        toast('لا اتصال — حُفظت وسترفع تلقائيًّا', 'bad');
+        renderMineLocal();
+        return;
+      }
+      if (r && r.needsManualIn) {
+        // Cannot be decided without a human: fall back to the full flow.
+        pending = { token: tok, name: r.name || '', id: 0 };
+        openFix(r.name || '');
+        signal(false);
+        return;
+      }
+      if (r && r.error) { toast(r.error, 'bad'); signal(false); return; }
+      signal(true);
+      renderFastResult(r, payload.direction);
+      loadMine();
+    });
+  }
+
+  /* The confirmation, shown AFTER the write. Deliberately the same colours
+   * and the same duplicate wording as the normal panel -- a volunteer
+   * switching modes should not have to learn a second vocabulary. */
+  function renderFastResult(r, dir) {
+    var box = $('result');
+    if (!box) return;
+    var dup = !!(r && r.duplicate);
+    var name = (r && r.name) || '';
+    box.style.display = '';
+    box.innerHTML =
+      '<div class="res ' + (dup ? 'res--dup' : 'res--ok') + '">' +
+        '<i class="fas ' + (dup ? 'fa-circle-exclamation' : 'fa-circle-check') + '"></i>' +
+        '<div><strong>' + esc(name) + '</strong>' +
+        '<span>' + (dup ? 'مُسجَّل قبل قليل — لم يُسجَّل مرتين'
+                        : (dir === 'out' ? 'سُجّل خروجه' : 'سُجّل دخوله') +
+                          (r && r.durationMinutes ? ' · مكث ' + fmtMin(r.durationMinutes) : '')) +
+        '</span></div>' +
+      '</div>';
+    // Cleared on its own so the next badge meets an empty panel rather
+    // than the previous person's name.
+    clearTimeout(window.__fastClear);
+    window.__fastClear = setTimeout(function () {
+      if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+    }, 2600);
+  }
+
+  function lookup(tok, regId) {
+    lastToken = tok || '';
+    lastTokenAt = Date.now();
+    if (tok && fastModeOn()) { fastRecord(tok); return; }
+    var qs = tok ? 'token=' + encodeURIComponent(tok) : 'id=' + encodeURIComponent(regId);
+    api('GET', '/checkin/lookup?' + qs).then(function (r) {
+      if (r.error) { renderResult({ error: r.error }); signal(false); return; }
+      r._token = tok || '';
+      if (r.days && r.days.length) days = r.days;
+      renderResult(r);
+      signal(true);
+    });
+  }
+
+  function confirmScan(manualInTime) {
+    if (busy || !pending) return;
+    if (!settingsReady()) { toast('اختر اليوم والقاعة أولًا', 'bad'); return; }
+    busy = true;
+    var btn = $('confirmBtn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جارٍ التسجيل…'; }
+    var payload = {
+      token: pending.token || '',
+      registration_id: pending.token ? 0 : pending.id,
+      conf_day: $('ciDay').value,
+      direction: direction(),
+      location: $('ciLocation').value,
+      activity: '',
+      manual_in_time: manualInTime || '',
+      // The time the scan ACTUALLY happened — matters when this ends up in
+      // the offline queue and is replayed minutes later.
+      scanned_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      method: pending.token ? 'qr' : 'manual'
+    };
+    var label = pending.name + ' · ' + (payload.direction === 'out' ? 'خروج' : 'دخول');
+
+    api('POST', '/checkin/record', payload).then(function (r) {
+      busy = false;
+      if (r && r.offline) {
+        enqueue(payload, label);
+        toast('لا اتصال — حُفظت المسحة وسترفع تلقائيًّا', 'bad');
+        signal(true);
+        $('result').style.display = 'none';
+        pending = null; lastToken = '';
+        renderMineLocal();
+        return;
+      }
+      if (r && r.needsManualIn) {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> تأكيد الخروج'; }
+        openFix(r.name || (pending && pending.name) || '');
+        signal(false);
+        return;
+      }
+      if (r.error) {
+        toast(r.error, 'bad'); signal(false);
+        if (btn) { btn.disabled = false; btn.innerHTML = 'إعادة المحاولة'; }
+        return;
+      }
+      if (r.duplicate) toast('مُسجَّل قبل قليل (' + hhmm(r.scannedAt) + ') — لم يُسجَّل مرتين', 'bad');
+      else if (r.direction === 'out') toast('خروج ' + r.name + (r.durationMinutes != null ? ' · ' + fmtMin(r.durationMinutes) : ''), 'ok');
+      else toast('دخول ' + r.name, 'ok');
+      signal(true);
+      $('result').style.display = 'none';
+      pending = null; lastToken = '';
+      loadMine();
+    });
+  }
+
+  // ---- missing check-in correction ----------------------------------
+  function openFix(name) {
+    $('fixWhy').innerHTML = '<b>' + esc(name) + '</b> ليس لديه تسجيل دخول اليوم، '
+      + 'فلا يمكن تسجيل خروج بلا دخول (وإلا صارت مدّة حضوره مجهولة).<br>'
+      + 'اسأله متى دخل تقريبًا واكتب الوقت — سيُسجَّل الدخول والخروج معًا.';
+    var d = new Date(); d.setHours(d.getHours() - 1);
+    $('fixTime').value = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+    $('fixModal').classList.add('open');
+  }
+  $('fixCancel').addEventListener('click', function () { $('fixModal').classList.remove('open'); });
+  $('fixConfirm').addEventListener('click', function () {
+    var v = $('fixTime').value;
+    if (!/^\d{2}:\d{2}$/.test(v)) { toast('اكتب وقتًا صحيحًا', 'bad'); return; }
+    $('fixModal').classList.remove('open');
+    confirmScan(v);
+  });
+
+  // ---- edit an existing scan ----------------------------------------
+  function openEdit(id, t, dir) {
+    editingId = id;
+    $('editWhat').innerHTML = 'مسحة <b>' + (dir === 'out' ? 'خروج' : 'دخول')
+      + '</b> مسجَّلة الساعة <b>' + esc(t) + '</b>.';
+    $('editTime').value = t;
+    $('editModal').classList.add('open');
+  }
+  $('editCancel').addEventListener('click', function () { $('editModal').classList.remove('open'); });
+  $('editSave').addEventListener('click', function () {
+    var v = $('editTime').value;
+    if (!/^\d{2}:\d{2}$/.test(v)) { toast('اكتب وقتًا صحيحًا', 'bad'); return; }
+    api('POST', '/checkin/adjust', { id: editingId, action: 'time', time: v }).then(function (r) {
+      if (r.error) { toast(r.error, 'bad'); return; }
+      $('editModal').classList.remove('open');
+      toast('تم تعديل الوقت', 'ok');
+      if (pending) lookup(pending.token, pending.id);
+      loadMine();
+    });
+  });
+  $('editDelete').addEventListener('click', function () {
+    if (!confirm('حذف هذه المسحة نهائيًّا؟')) return;
+    api('POST', '/checkin/adjust', { id: editingId, action: 'delete' }).then(function (r) {
+      if (r.error) { toast(r.error, 'bad'); return; }
+      $('editModal').classList.remove('open');
+      toast('تم حذف المسحة', 'ok');
+      if (pending) lookup(pending.token, pending.id);
+      loadMine();
+    });
+  });
+
+  // ---- camera ------------------------------------------------------
+  function stopCamera() {
+    if (!scanner) return;
+    var sc = scanner; scanner = null;
+    sc.stop().then(function () { try { sc.clear(); } catch (e) {} }).catch(function () {});
+    $('startBtn').style.display = ''; $('stopBtn').style.display = 'none';
+  }
+
+  /* ====== WHY THE CAMERA DID NOT START (v93) ======
+   *
+   * The old failure path was one toast: "تعذّر تشغيل الكاميرا: " plus
+   * whatever string the browser produced, gone in three seconds. A
+   * volunteer standing at the door with a queue in front of them learns
+   * nothing from that, and every one of the causes below has a DIFFERENT
+   * remedy — some of which they can fix in ten seconds and some of which
+   * only the organiser can.
+   *
+   * THE ONE THAT ACTUALLY HAPPENED, and why it was invisible: the site
+   * was sending `Permissions-Policy: camera=()`, which denies the camera
+   * to every origin including itself. A browser-level denial like that
+   * never shows a permission prompt at all, so it looks identical to "the
+   * volunteer refused" while being completely out of their hands. It is
+   * checked for FIRST below, by name.
+   */
+  function cameraBlockedReason() {
+    // 1) Not a secure context. getUserMedia simply does not exist on a
+    //    plain http:// page, and this is easy to hit by opening the site
+    //    without the s.
+    if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+      return { title: 'الصفحة ليست على اتصال آمن',
+               body: 'افتح العنوان بـ https:// بدل http:// — المتصفّحات تمنع الكاميرا على الاتصال غير الآمن.',
+               who: 'you' };
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return { title: 'متصفّحك لا يدعم الكاميرا',
+               body: 'افتح الصفحة بمتصفّح Chrome أو Safari حديث. وإن كنت داخل تطبيق (واتساب أو فيسبوك)، اضغط «فتح في المتصفّح».',
+               who: 'you' };
+    }
+    /* 3) THE POLICY BLOCK, ASKED DIRECTLY (v98).
+     *
+     * Until now this was only discovered by calling getUserMedia and
+     * pattern-matching the thrown message -- which is fragile (the wording
+     * is not standardised) and happens AFTER a pointless camera request.
+     * The browser will answer the question outright:
+     *
+     *   document.featurePolicy.allowsFeature('camera') === false
+     *
+     * means a Permissions-Policy header forbids the camera for this
+     * document. No prompt will ever appear, and nothing the volunteer does
+     * on their phone can change it.
+     *
+     * Chrome/Edge expose featurePolicy; Safari and Firefox do not, so a
+     * missing API is NOT treated as "blocked" -- we fall through and let
+     * getUserMedia decide, exactly as before. */
+    try {
+      var fp = document.featurePolicy || document.permissionsPolicy;
+      if (fp && typeof fp.allowsFeature === 'function' && !fp.allowsFeature('camera')) {
+        return { title: 'الكاميرا محجوبة من إعدادات الخادم',
+                 body: 'ليست مشكلة في هاتفك ولا في إذن المتصفّح — الخادم نفسه يمنع الكاميرا لهذه الصفحة '
+                     + '(ترويسة Permissions-Policy). استعمل «التقاط صورة للرمز» بالأسفل الآن، فهي تعمل رغم هذا المنع، '
+                     + 'وأبلغ المنظّم ليرفع الحجب.',
+                 who: 'admin', offerPhoto: true };
+      }
+    } catch (e) { /* unknown API shape -- let getUserMedia answer */ }
+    return null;
+  }
+
+  /* Reads the browser's own view of the camera permission when it offers
+   * one. Returns 'granted' | 'denied' | 'prompt' | '' (unknown). */
+  async function cameraPermissionState() {
+    try {
+      if (!navigator.permissions || !navigator.permissions.query) return '';
+      var st = await navigator.permissions.query({ name: 'camera' });
+      return st && st.state ? st.state : '';
+    } catch (e) { return ''; }   // Firefox and older Safari throw here
+  }
+
+  /* ====== RECOVERING FROM AN ACCIDENTAL "BLOCK" (v98) ======
+   * The owner's report: "if I deny once by mistake it is saved forever and
+   * scanning is dead for me."
+   *
+   * That is exactly how browsers behave -- a denied camera permission is
+   * remembered per origin, and NO page can clear it from script. What a
+   * page can do is three things, and none of them were being done:
+   *
+   *   1. Notice the denial BEFORE calling getUserMedia, so the volunteer
+   *      gets instructions instead of a failure.
+   *   2. Give the steps for the browser they are actually holding --
+   *      "🔒 next to the address bar" is wrong on iOS Safari, where it is
+   *      the «الأحرف» / aA menu, and wrong again in an in-app browser,
+   *      where the only fix is to open the page in a real browser.
+   *   3. Watch for the permission being granted and start the camera the
+   *      moment it flips, with no reload. Telling someone to "reload the
+   *      page" after changing a setting is how you lose them.
+   */
+  function browserFamily() {
+    var ua = navigator.userAgent || '';
+    // In-app browsers first: their camera story is different and their UA
+    // also contains Safari/Chrome, so order matters.
+    if (/FBAN|FBAV|Instagram|Line\/|Twitter|WhatsApp/i.test(ua)) return 'inapp';
+    var iOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (iOS) return 'ios';
+    if (/Android/i.test(ua)) return 'android';
+    return 'desktop';
+  }
+
+  function permissionHowTo() {
+    switch (browserFamily()) {
+      case 'inapp':
+        return 'أنت تتصفّح داخل تطبيق (واتساب أو فيسبوك…) وهو لا يعطي صلاحية الكاميرا للصفحات. '
+             + 'اضغط زرّ ⋯ ثم «فتح في المتصفّح» (Chrome أو Safari)، وافتح الرابط من هناك.';
+      case 'ios':
+        return 'من شريط العنوان اضغط «‏AA‏» ← «إعدادات موقع الويب» ← الكاميرا ← «السماح». '
+             + 'إن لم تجدها: الإعدادات ← Safari ← الكاميرا ← «اسأل» أو «السماح».';
+      case 'android':
+        return 'اضغط رمز القفل 🔒 بجانب العنوان ← الأذونات / «أذونات الموقع» ← الكاميرا ← «السماح». '
+             + 'أو: إعدادات Chrome ← إعدادات المواقع ← الكاميرا ← ابحث عن هذا الموقع وامسح المنع.';
+      default:
+        return 'اضغط رمز القفل 🔒 بجانب العنوان ← الكاميرا ← «السماح»، ثم اضغط «جرّب مرة أخرى».';
+    }
+  }
+
+  /* Starts the camera by itself the instant the volunteer flips the
+   * permission to "allow" in browser settings. Chrome fires `change` on
+   * the PermissionStatus; Safari does not expose the API at all, which is
+   * why the retry button below exists as well rather than instead. */
+  function watchCameraPermission() {
+    try {
+      if (!navigator.permissions || !navigator.permissions.query) return;
+      navigator.permissions.query({ name: 'camera' }).then(function (st) {
+        if (!st) return;
+        st.onchange = function () {
+          if (st.state === 'granted' && !scanner) {
+            clearCameraProblem();
+            toast('سُمح بالكاميرا — جارٍ التشغيل', 'ok');
+            $('startBtn').click();
+          }
+        };
+      }).catch(function () {});
+    } catch (e) { /* Firefox throws on an unknown descriptor */ }
+  }
+
+  /* Turns whatever getUserMedia threw into something with a remedy. */
+  function explainCameraError(err) {
+    var name = (err && err.name) || '';
+    var msg  = ((err && err.message) || '') + '';
+    // The policy denial reports as NotAllowedError, same as a user refusal,
+    // but the message names the policy. Checked first because the remedy
+    // is completely different: the volunteer can do nothing about it.
+    if (/permission|policy/i.test(msg) && /disallow|denied by|policy/i.test(msg)) {
+      return { title: 'الكاميرا محجوبة من إعدادات الخادم',
+               body: 'ليست مشكلة في هاتفك ولا في إذن المتصفّح. استعمل «التقاط صورة للرمز» بالأسفل — تعمل رغم هذا المنع. وأبلغ المنظّم ليرفع الحجب عن الكاميرا.',
+               who: 'admin', offerPhoto: true };
+    }
+    if (name === 'NotAllowedError' || name === 'SecurityError') {
+      return { title: 'لم يُسمح باستخدام الكاميرا',
+               body: permissionHowTo(),
+               who: 'you', retry: true, offerPhoto: true };
+    }
+    if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+      return { title: 'لم يُعثر على كاميرا خلفية',
+               body: 'جرّب من هاتف فيه كاميرا خلفية، أو استخدم البحث بالاسم.',
+               who: 'you' };
+    }
+    if (name === 'NotReadableError' || name === 'AbortError') {
+      return { title: 'الكاميرا مشغولة بتطبيق آخر',
+               body: 'أغلق أي تطبيق كاميرا أو مكالمة فيديو مفتوحة، ثم أعد المحاولة.',
+               who: 'you' };
+    }
+    return { title: 'تعذّر تشغيل الكاميرا',
+             body: (msg || 'سبب غير معروف') + ' — استخدم البحث بالاسم وأبلغ المنظّم.',
+             who: 'unknown' };
+  }
+
+  /* Shows the explanation IN the scanner box, where the camera would have
+   * been, and leaves it there. Not a toast: this is the one message the
+   * volunteer needs to still be able to read while they find the
+   * organiser. */
+  function showCameraProblem(info) {
+    var box = document.getElementById('camProblem');
+    if (!box) return;
+    box.innerHTML =
+      '<i class="fas fa-triangle-exclamation"></i>' +
+      '<strong>' + info.title + '</strong>' +
+      '<span>' + info.body + '</span>' +
+      (info.who === 'admin' ? '<span class="camProblem-tag">يحتاج تدخّل المنظّم</span>' : '') +
+      (info.retry ? '<button type="button" class="btn btn--gold camProblem-retry" id="camRetry">'
+                  + '<i class="fas fa-rotate-right"></i> جرّب مرة أخرى</button>' : '');
+    box.hidden = false;
+    var rb = document.getElementById('camRetry');
+    if (rb) rb.addEventListener('click', function () { clearCameraProblem(); $('startBtn').click(); });
+    /* When the live camera cannot be used at all, the photo route stops
+       being a secondary option and becomes THE way to scan -- so it is
+       promoted and the dead "تشغيل الكاميرا" button is hidden. A volunteer
+       at a door should not have to work out which of two buttons works. */
+    if (info.offerPhoto) {
+      var pb = $('photoBtn');
+      if (pb) { pb.classList.remove('btn--ghost'); pb.classList.add('btn--gold'); }
+      var sb = $('startBtn'); if (sb) sb.style.display = 'none';
+    }
+  }
+  function clearCameraProblem() {
+    var box = document.getElementById('camProblem');
+    if (box) box.hidden = true;
+  }
+
+  $('startBtn').addEventListener('click', function () {
+    if (!settingsReady()) { toast('اختر اليوم والقاعة أولًا', 'bad'); return; }
+    if (typeof Html5Qrcode === 'undefined') {
+      showCameraProblem({ title: 'مكتبة الماسح لم تُحمَّل',
+        body: 'أعد تحميل الصفحة. إن تكرّر الأمر فملف vendor/html5-qrcode.min.js ناقص على الخادم — أبلغ المنظّم. واستخدم البحث بالاسم الآن.',
+        who: 'admin' });
+      return;
+    }
+    if (scanner) return;
+
+    /* Check what we can check BEFORE asking for the camera (v93). An
+       insecure page or a browser without getUserMedia produces a useless
+       error from the library; naming the cause here is the difference
+       between a volunteer fixing it in ten seconds and giving up. */
+    var blocked = cameraBlockedReason();
+    if (blocked) { showCameraProblem(blocked); return; }
+    clearCameraProblem();
+    beep(true);   // unlock audio on this user gesture; browsers block it otherwise
+
+    /* Ask the browser whether it has ALREADY been told no, before asking
+       it again. A denied permission makes getUserMedia reject instantly
+       with the same NotAllowedError a fresh refusal gives -- so without
+       this the volunteer sees a bare failure, and the retry they press
+       fails identically, forever. Checked here rather than in
+       cameraBlockedReason() because it is async and that one is
+       deliberately synchronous. */
+    cameraPermissionState().then(function (st) {
+      if (st === 'denied') {
+        showCameraProblem({
+          title: 'الكاميرا ممنوعة لهذا الموقع',
+          body: 'سبق أن ضُغط «منع»، والمتصفّح يحفظ ذلك ولا يسأل مرّة أخرى. ' + permissionHowTo(),
+          who: 'you', retry: true, offerPhoto: true
+        });
+        return;
+      }
+      startCameraNow();
+    });
+  });
+
+  function startCameraNow() {
+    scanner = new Html5Qrcode('reader', {
+      // The single biggest speed win: on Android Chrome this hands decoding
+      // to the browser's native, hardware-accelerated BarcodeDetector.
+      // Where unsupported the library falls back to its own decoder, so it
+      // is safe everywhere.
+      experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+      verbose: false
+    });
+    scanner.start(
+      { facingMode: 'environment' },
+      {
+        // 25fps with the native detector; 15 was the perceptible "lag" —
+        // frames were being dropped between decode attempts.
+        fps: 25,
+        qrbox: function (w, h) { var m = Math.floor(Math.min(w, h) * 0.7); return { width: m, height: m }; },
+        aspectRatio: 1.0,
+        // Our codes are never mirrored; skipping the flipped decode pass
+        // roughly halves the work per frame.
+        disableFlip: true,
+        videoConstraints: {
+          facingMode: 'environment',
+          // 720p decodes markedly faster than the 1080p+ a modern phone
+          // hands us by default, and a QR needs nothing like 1080p.
+          width: { ideal: 1280 }, height: { ideal: 720 },
+          advanced: [{ focusMode: 'continuous' }]
+        }
+      },
+      function (decoded) {
+        var now = Date.now();
+        // Guard by token AND time: the same badge can be re-scanned later
+        // (a genuine second session) but not sixty times a second.
+        if (decoded === lastToken && (now - lastTokenAt) < 4000) return;
+        lookup(decoded);
+      },
+      function () { /* per-frame decode misses are normal */ }
+    ).then(function () {
+      $('startBtn').style.display = 'none';
+      $('stopBtn').style.display = '';
+    }).catch(function (err) {
+      scanner = null;
+      var info = explainCameraError(err);
+      showCameraProblem(info);
+      toast(info.title, 'bad');
+      // The browser's own permission state, when it exposes one, separates
+      // "they tapped Block" from "a policy denied it before anyone was
+      // asked" -- the two look identical in the error object.
+      cameraPermissionState().then(function (st) {
+        if (st === 'denied' && info.who !== 'admin') {
+          showCameraProblem({ title: 'الكاميرا مرفوضة لهذا الموقع',
+            body: 'سبق أن ضُغط «منع» لهذا الموقع، والمتصفّح يحفظ ذلك ولا يسأل مرّة أخرى. ' + permissionHowTo(),
+            who: 'you', retry: true, offerPhoto: true });
+        }
+      });
+      console.error('[AUHMC] camera failed:', err && err.name, err && err.message);
+    });
+  }
+  /* ====== DECODE A PHOTO INSTEAD OF A STREAM (v98) ======
+   * Html5Qrcode.scanFile() runs the same decoder over a still image, so a
+   * code read this way goes down exactly the same path as a live scan --
+   * same duplicate guard, same offline queue, same confirmation. Nothing
+   * downstream needs to know which way the token arrived.
+   *
+   * A separate Html5Qrcode instance on a hidden element: the live scanner
+   * owns #reader and may be mid-stream, and handing one instance two jobs
+   * is how you get a decoder that is "already running" at the door. */
+  var fileScanner = null;
+  function scanPhoto(file) {
+    if (!file) return;
+    if (typeof Html5Qrcode === 'undefined') { toast('مكتبة الماسح غير محمَّلة', 'bad'); return; }
+    if (!settingsReady()) { toast('اختر اليوم والقاعة أولًا', 'bad'); return; }
+    var btn = $('photoBtn');
+    if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جارٍ القراءة…';
+    var restore = function () {
+      if (btn) btn.innerHTML = '<i class="fas fa-camera-retro"></i> التقاط صورة للرمز';
+      // Cleared so photographing the SAME badge twice still fires `change`.
+      var inp = $('photoInput'); if (inp) inp.value = '';
+    };
+    try {
+      if (!fileScanner) fileScanner = new Html5Qrcode('photoReader', { verbose: false });
+    } catch (e) { toast('تعذّر تهيئة القارئ', 'bad'); restore(); return; }
+    // showImage=false: the volunteer does not need the photo painted back
+    // at them, and rendering it costs a reflow per badge at the door.
+    fileScanner.scanFile(file, false).then(function (decoded) {
+      restore();
+      lookup(decoded);
+    }).catch(function () {
+      restore();
+      signal(false);
+      toast('لم يُقرأ الرمز من الصورة — قرّب الكاميرا من الرمز وأعد الالتقاط', 'bad');
+    });
+  }
+  (function () {
+    var inp = $('photoInput');
+    if (inp) inp.addEventListener('change', function () { scanPhoto(this.files && this.files[0]); });
+  })();
+
+  $('stopBtn').addEventListener('click', stopCamera);
+  // A phone in a pocket with the camera running flattens the battery before
+  // the first break.
+  document.addEventListener('visibilitychange', function () { if (document.hidden) stopCamera(); });
+  // Auto-start the camera the moment a volunteer flips the permission to
+  // "allow" in browser settings -- no reload, no second trip to the page.
+  watchCameraPermission();
+
+  // ---- search + live status -----------------------------------------
+  var searchTimer = null;
+  $('searchBox').addEventListener('input', function () {
+    clearTimeout(searchTimer);
+    var q = this.value.trim();
+    var box = $('searchResults');
+    if (q.length < 2) { box.innerHTML = ''; return; }
+    searchTimer = setTimeout(function () {
+      api('GET', '/checkin/search?q=' + encodeURIComponent(q)
+          + '&day=' + encodeURIComponent($('ciDay').value || '')).then(function (r) {
+        var list = (r && r.results) || [];
+        if (!list.length) { box.innerHTML = '<p class="hint">لا نتائج. تأكّد أن الشخص مقبول.</p>'; return; }
+        var more = (r.total && r.total > list.length)
+          ? '<p class="hint">يُعرض ' + list.length + ' من ' + r.total + ' — اكتب المزيد لتضييق البحث.</p>' : '';
+        box.innerHTML = list.map(function (p, i) {
+          var st = p.status || {}, chip, note;
+          if (st.inside) {
+            chip = '<span class="chip chip--in">داخل الآن</span>';
+            note = 'منذ ' + esc(hhmm(st.since))
+                 + (st.location ? ' · ' + esc(st.location) : '')
+                 + (st.scannedBy ? ' · سجّله ' + esc(st.scannedBy) : '');
+          } else if (st.seenToday) {
+            chip = '<span class="chip chip--out">خرج</span>';
+            note = (st.sessions || 0) + ' جلسة اليوم · ' + fmtMin(st.minutesToday || 0);
+          } else {
+            chip = '<span class="chip chip--none">لم يُسجَّل اليوم</span>';
+            note = 'لا مسوحات اليوم';
+          }
+          return '<div class="hit"><div style="flex:1;min-width:0;">'
+            + '<b>' + esc(p.name) + '</b> ' + chip
+            + '<small>' + (p.badgeNo ? esc(p.badgeNo) + ' · ' : '') + note + '</small>'
+            + '</div><button class="pick" data-i="' + i + '">اختيار</button></div>';
+        }).join('') + more;
+        Array.prototype.forEach.call(box.querySelectorAll('button[data-i]'), function (b) {
+          b.addEventListener('click', function () {
+            var p = list[parseInt(b.getAttribute('data-i'), 10)];
+            // Resolved by row id: the search endpoint does not hand out
+            // check-in tokens (v37).
+            lookup(null, p.id);
+          });
+        });
+      });
+    }, 240);
+  });
+
+  // ---- my recent scans ----------------------------------------------
+  function renderMineLocal() {
+    var box = $('mineList'), q = queue();
+    var head = !q.length ? '' : q.map(function (x) {
+      return '<div class="mine-row">'
+        + '<span class="mine-time">—</span>'
+        + '<span class="mine-name">' + esc(x.label) + '</span>'
+        + '<span class="pill pill--wait"><i class="fas fa-clock"></i> بانتظار الرفع</span></div>';
+    }).join('');
+    box.innerHTML = head + (box._serverHtml || '');
+  }
+  function loadMine() {
+    api('GET', '/checkin/mine?limit=25').then(function (r) {
+      var box = $('mineList');
+      if (!r || r.error) { box._serverHtml = ''; renderMineLocal(); return; }
+      if (r.needsMigration) {
+        box._serverHtml = '<p class="empty">يحتاج تنفيذ schema_update_v29.sql لعرض السجل.</p>';
+        renderMineLocal(); return;
+      }
+      var list = r.scans || [];
+      $('mineCount').textContent = list.length ? (list.length + ' مسحة') : '';
+      box._serverHtml = !list.length ? '<p class="empty">لا مسوحات بعد.</p>' : list.map(function (s) {
+        return '<div class="mine-row">'
+          + '<span class="mine-time">' + esc(hhmm(s.scannedAt)) + '</span>'
+          + '<span class="mine-name">' + esc(s.name) + '</span>'
+          + (s.location ? '<span class="mine-time">' + esc(s.location) + '</span>' : '')
+          + '<span class="pill pill--' + (s.direction === 'out' ? 'out' : 'in') + '">'
+          + (s.direction === 'out' ? 'خروج' : 'دخول') + '</span></div>';
+      }).join('');
+      renderMineLocal();
+    });
+  }
+  $('mineRefresh').addEventListener('click', function () { flushQueue(true).then(loadMine); });
+
+  // ---- boot --------------------------------------------------------
+  function start(user) {
+    $('loginView').style.display = 'none';
+    $('appView').style.display = '';
+    $('whoName').textContent = (user && user.name) || '';
+    fetch(APP_BASE + '/api/content').then(function (r) { return r.json(); })
+      .then(function (d) { fillDays(d && d.confDays); fillLocations(d && d.checkinLocations); })
+      .catch(function () { fillDays([]); fillLocations([]); });
+    paintNet();
+    flushQueue(true);
+    loadMine();
+  }
+
+  if (token()) {
+    api('GET', '/auth/verify').then(function (r) {
+      if (r && r.valid) start(r.user);
+      else $('loginView').style.display = '';
+    });
+  } else {
+    $('loginView').style.display = '';
+  }
+})();
+</script>
+</body>
+</html>
