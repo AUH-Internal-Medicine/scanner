@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-<!-- AUHMC deploy version: 2026-10-19-v98 (volunteer) -->
+<!-- AUHMC deploy version: 2026-10-21-v99 (volunteer) -->
 
 <!-- ====== ANTI-CLICKJACKING (v41) ======
      Verified against the live server: /api/* responses carry
@@ -506,21 +506,18 @@
      never initialises and check-in falls back to typing names by hand for
      every attendee. Verified against the SRI hash this tag used to carry;
      ?v is the library version, not the deploy stamp (see the icons tag). -->
-<!-- ════════════════════════════════════════════════════════════════
-     ONE LINE TO EDIT, AND IT IS THIS ONE.
+<!-- ===================================================================
+     نسخة الماسح المستضافة خارج الموقع (GitHub Pages)
+     سببها واحد: خادم المشفى يُلحق بكل رد ترويسة تمنع الكاميرا،
+     ولا يمكن لأي ملف في الحساب إزالتها.
 
-     This copy of the scanner is hosted away from the site (GitHub Pages)
-     for exactly one reason: the hospital server appends
-     `Permissions-Policy: camera=()` to every response, which forbids the
-     camera outright, and no file in that account can remove it.
+     كل شيء آخر يبقى في مكانه: قاعدة البيانات، لوحة التحكم، البطاقات.
+     هذه الصفحة تنادي الـAPI نفسه عبر النطاقين.
 
-     Everything else stays where it is -- the database, the admin panel,
-     the badges. This page just calls the same API across origins.
-
-     If the site ever moves, change the address below AND the matching
-     SCANNER_ORIGIN in api/index.php. Both ends, or neither: the browser
-     refuses the call if the server does not name this origin back.
-     ════════════════════════════════════════════════════════════════ -->
+     السطر الوحيد القابل للتعديل هو التالي. إن انتقل الموقع فعدِّله
+     وعدِّل معه SCANNER_ORIGIN في api/index.php — الطرفان معًا أو لا
+     شيء: المتصفّح يرفض الطلب إن لم يُسمِّ الخادمُ هذا النطاق.
+     =================================================================== -->
 <script>window.AUHMC_API = 'https://auh.edu.sy/auhmc/api';</script>
 <script src="vendor/html5-qrcode.min.js?v=2.3.8"></script>
 <script>
@@ -542,10 +539,23 @@
    * account can remove. Then this page runs on, say, muqimeen.com while
    * the data still lives at auh.edu.sy.
    *
-   * Set it by putting ONE line in the page before this script:
-   *     <script>window.AUHMC_API = 'https://auh.edu.sy/auhmc/api';</script>
-   * and add that same origin to SCANNER_ORIGIN in api/index.php, or the
-   * browser will refuse the cross-origin calls. Both ends, or neither. */
+   * ⚠ NEVER write a script tag -- opening OR closing -- inside this file,
+   * not even in a comment or a string. The HTML parser does not understand
+   * JavaScript comments: it ends the script element at the first closing
+   * tag it meets, anywhere inside it. Writing one here truncated this file
+   * mid-way, and the whole second half of the scanner (camera, day and
+   * hall loaders, queue, boot) was parsed as TEXT and printed onto the
+   * page -- with the header still rendering and the tag counts still
+   * balanced, so nothing caught it. فحص-الكود now checks for exactly this;
+   * see §9.81.
+   *
+   * TO POINT THIS PAGE AT A REMOTE API: add one line to the page, above
+   * the scanner script, assigning the API base to window.AUHMC_API --
+   * e.g. the value 'https://auh.edu.sy/auhmc/api'. The ready-made copy in
+   * 7-ماسح-github/ already has it.
+   *
+   * Then add that same origin to SCANNER_ORIGIN in api/index.php, or the
+   * browser refuses the cross-origin calls. Both ends, or neither. */
   var API_ROOT = (typeof window.AUHMC_API === 'string' && window.AUHMC_API)
     ? window.AUHMC_API.replace(/\/+$/, '')
     : (APP_BASE + '/api');
@@ -726,11 +736,23 @@
        when the hall list was empty -- a dead end: the volunteer is told to
        pick something that does not exist, with no hint that only the
        organiser can fix it. */
+    /* ---- AND BACK AGAIN (v99) ----
+     * This branch used to be one-way. paintGate() runs on load, BEFORE the
+     * /api/content fetch has resolved, so the hall list is still just its
+     * placeholder and `noHalls` is true -- it wrote "no halls are defined
+     * yet, ask the organiser to add them" and then never took it back when
+     * the halls arrived a moment later. The volunteer was left reading an
+     * instruction to go and ask for something that already existed, over a
+     * working hall dropdown. Measured: 2 halls present, message still up.
+     *
+     * The original text is captured once, on the element, so restoring it
+     * cannot drift from the markup. */
     var noHalls = $('ciLocation').options.length <= 1;
     var lockMsg = $('scanLock').querySelector('span, p, div') || $('scanLock');
-    if (noHalls) {
-      lockMsg.innerHTML = 'لا توجد قاعات مُعرَّفة بعد.<br>اطلب من المنظّم إضافتها من لوحة التحكم ← الحضور والمتطوّعون.';
-    }
+    if (!lockMsg.dataset.defaultMsg) lockMsg.dataset.defaultMsg = lockMsg.innerHTML;
+    lockMsg.innerHTML = noHalls
+      ? 'لا توجد قاعات مُعرَّفة بعد.<br>اطلب من المنظّم إضافتها من لوحة التحكم ← الحضور والمتطوّعون.'
+      : lockMsg.dataset.defaultMsg;
 
     /* ---- Collapse the setup once it is complete (v93) ---- */
     $('setupDone').hidden = !ok;
@@ -782,7 +804,10 @@
     e.preventDefault();
     var btn = e.target.querySelector('button');
     btn.disabled = true;
-    fetch(APP_BASE + '/api/auth/login', {
+    // API_ROOT -- see the note on the /content fetch below. Login is the
+    // first request the page ever makes, so getting this wrong on a
+    // remote-hosted scanner means the volunteer cannot even sign in.
+    fetch(API_ROOT + '/auth/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: $('vEmail').value.trim(), password: $('vPass').value })
     }).then(function (r) { return r.json(); }).then(function (d) {
@@ -1569,7 +1594,14 @@
     $('loginView').style.display = 'none';
     $('appView').style.display = '';
     $('whoName').textContent = (user && user.name) || '';
-    fetch(APP_BASE + '/api/content').then(function (r) { return r.json(); })
+    // API_ROOT, not APP_BASE: this is the ONE fetch that did not go
+    // through the api() helper, so when the scanner is hosted on another
+    // origin it was asking ITS OWN origin for /api/content, getting a 404,
+    // and rendering an empty day list and "no halls defined" -- with the
+    // login working perfectly, which made it look like a server-side
+    // problem. Caught by running the page on a second port against the
+    // real API. Any new direct fetch must use API_ROOT too.
+    fetch(API_ROOT + '/content').then(function (r) { return r.json(); })
       .then(function (d) { fillDays(d && d.confDays); fillLocations(d && d.checkinLocations); })
       .catch(function () { fillDays([]); fillLocations([]); });
     paintNet();
