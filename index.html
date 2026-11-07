@@ -626,19 +626,19 @@
   var $ = function (id) { return document.getElementById(id); };
   var scanner = null, lastToken = '', lastTokenAt = 0, busy = false;
   var pending = null, days = [], locations = [], editingId = null;
-  /* Shut only while a question is on screen waiting for the volunteer —
-   * never merely because a request is in flight. See fastRecord(). */
-  var dialogOpen = false, dialogTimer = null;
-  /* ⚠ Always through these two. A gate that stops the camera MUST have
-   * exactly one way in and one way out, and a timeout — a volunteer who
-   * walks away from an unanswered question must not leave the door dead
-   * for the next person. 45s is long enough to read and decide. */
-  function holdCamera() {
-    dialogOpen = true;
-    clearTimeout(dialogTimer);
-    dialogTimer = setTimeout(function () { dialogOpen = false; }, 45000);
-  }
-  function releaseCamera() { dialogOpen = false; clearTimeout(dialogTimer); }
+  /* ⚠ NOTHING MAY STOP THE CAMERA BETWEEN SCANS.
+   *
+   * v113 briefly replaced the `busy` lock with a gate that stayed shut
+   * until a warning on screen was answered. It was wrong, and the owner
+   * caught it the same day: in fast mode EVERY person who was already
+   * inside halted the queue until someone tapped a button, which is the
+   * opposite of what fast mode is for. The warning has to be something
+   * the volunteer can read and ignore, not something they must dismiss.
+   *
+   * `busy` guards one scan at a time and releases on the response. The
+   * perceived slowness is the venue network, and the right answer to a
+   * slow network is the offline queue that already exists — not holding
+   * the camera. */
   /* Who is logged in. Needed because a volunteer may correct only THEIR
    * OWN scans (the server enforces it; this is so the button is not
    * offered for a row that would be refused). */
@@ -694,36 +694,6 @@
   }
   function buzz(ok) { try { if (navigator.vibrate) navigator.vibrate(ok ? 55 : [45,60,45]); } catch (e) {} }
   function signal(ok) { flash(ok); beep(ok); buzz(ok); }
-
-  /* ====== "I READ IT" — the instant acknowledgement (v113) ======
-   *
-   * The owner reported lag in the camera. The decoder is not the slow
-   * part: it already hands decoding to the browser's native
-   * BarcodeDetector at 25fps with the flipped pass disabled. What was
-   * slow was the ANSWER — every flash, beep and buzz waited for the
-   * server, so on venue wifi the volunteer held the phone over a badge
-   * that had been read half a second earlier and saw nothing at all.
-   *
-   * A scan now acknowledges itself the moment the code is decoded: a
-   * short, quiet, high tick that cannot be mistaken for the success tone
-   * that follows. The volunteer moves to the next person immediately and
-   * the result lands when it lands. */
-  function tick() {
-    try {
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (audioCtx.state === 'suspended') audioCtx.resume();
-      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
-      o.connect(g); g.connect(audioCtx.destination);
-      o.type = 'square'; o.frequency.value = 1500;
-      g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.12, audioCtx.currentTime + 0.005);
-      g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.05);
-      o.start(); o.stop(audioCtx.currentTime + 0.06);
-    } catch (e) {}
-    try { if (navigator.vibrate) navigator.vibrate(18); } catch (e) {}
-    var f = $('flash');
-    if (f) { f.className = 'flash on'; setTimeout(function () { f.className = 'flash'; }, 70); }
-  }
 
   function token() { return localStorage.getItem(TOKEN_KEY); }
   function direction() { return $('dirOut').checked ? 'out' : 'in'; }
@@ -1120,17 +1090,9 @@
    * `needsManualIn` (an exit with no matching entry) still has to stop and
    * ask, so that one case falls back to the normal dialog. */
   function fastRecord(tok) {
-    /* ⚠ The gate is `dialogOpen`, NOT "a request is in flight".
-     *
-     * `busy` was held for the whole round trip, so while one scan waited
-     * on the network the camera ignored every other badge — which is
-     * exactly the lag the owner felt. Different people are independent
-     * rows and the server serialises per person, so the queue has no
-     * reason to wait for the wire. The same badge twice is still
-     * blocked, by the token+4s guard in the decode callback. */
-    if (dialogOpen) return;
+    if (busy) return;
     if (!settingsReady()) { toast('اختر اليوم والقاعة أولًا', 'bad'); return; }
-    tick();                    // read — before anything touches the network
+    busy = true;
     var payload = {
       token: tok, registration_id: 0,
       conf_day: $('ciDay').value,
@@ -1141,6 +1103,7 @@
       method: 'qr'
     };
     api('POST', '/checkin/record', payload).then(function (r) {
+      busy = false;
       if (r && r.offline) {
         // The queue already replays these, so a dead network costs nothing
         // but a later upload -- the volunteer keeps scanning.
@@ -1152,7 +1115,6 @@
       }
       if (r && r.needsManualIn) {
         // Cannot be decided without a human: fall back to the full flow.
-        holdCamera();
         pending = { token: tok, name: r.name || '', id: 0 };
         openFix(r.name || '', hhmm(r.outAt || ''));
         signal(false);
@@ -1162,9 +1124,6 @@
       if (r && r.alreadyIn) {
         // Fast mode never calls lookup, so this warning is the ONLY
         // thing standing between a repeat badge and a silent second row.
-        // The gate stays shut until the volunteer answers: a decision is
-        // pending and the next badge must not scroll it away.
-        holdCamera();
         alreadyInPanel(r, payload);
         signal(false);
         return;
@@ -1250,7 +1209,10 @@
    * the volunteer actually has — and offers the one legitimate way
    * past it: the person left without scanning and has come back.
    *
-   * Sticky: no auto-dismiss, because a decision is waiting on it. */
+   * It does NOT stop the camera. In fast mode the queue keeps moving and
+   * the next badge replaces this panel — a warning the volunteer must
+   * dismiss before scanning the next person would defeat fast mode
+   * entirely, which is what v113 got wrong and the owner caught. */
   var forcePending = null;
   function alreadyInPanel(r, payload) {
     var box = $('result');
@@ -1279,12 +1241,12 @@
           + '<i class="fas fa-right-from-bracket"></i> نعم، سجّل خروجًا الآن</button>'
           + '<button class="btn btn--ghost btn--sm" id="forceInBtn">'
           + 'لا — خرج دون مسح وعاد الآن، سجّل دخولًا جديدًا</button>'
-          + '<button class="btn btn--ghost btn--sm" id="dismissWarnBtn">تجاهل وتابع المسح</button>'
+          + '<button class="btn btn--ghost btn--sm" id="dismissWarnBtn">إغلاق</button>'
         : '');
 
     var db = $('dismissWarnBtn');
     if (db) db.addEventListener('click', function () {
-      releaseCamera(); forcePending = null;
+      forcePending = null;
       box.style.display = 'none'; box.innerHTML = '';
       pending = null; lastToken = '';
     });
@@ -1298,7 +1260,7 @@
       api('POST', '/checkin/record', p).then(function (rr) {
         if (rr && rr.error) { ob.disabled = false; toast(rr.error, 'bad'); return; }
         if (rr && rr.needsManualIn) { openFix(rr.name || '', hhmm(rr.outAt || '')); return; }
-        forcePending = null; releaseCamera();
+        forcePending = null;
         toast('خروج ' + (rr.name || '') + (rr.durationMinutes != null ? ' · ' + fmtMin(rr.durationMinutes) : ''), 'ok');
         box.style.display = 'none'; box.innerHTML = '';
         pending = null; lastToken = '';
@@ -1313,7 +1275,6 @@
       var p = forcePending; forcePending = null;
       p.force = true;
       api('POST', '/checkin/record', p).then(function (rr) {
-        releaseCamera();
         if (rr && rr.error) { toast(rr.error, 'bad'); return; }
         toast('سُجّل دخولٌ جديد لـ' + (rr.name || ''), 'ok');
         box.style.display = 'none'; box.innerHTML = '';
@@ -1493,12 +1454,11 @@
   }
   $('fixTime').addEventListener('input', fixReadback);
   $('fixTime').addEventListener('change', fixReadback);
-  $('fixCancel').addEventListener('click', function () { $('fixModal').classList.remove('open'); releaseCamera(); });
+  $('fixCancel').addEventListener('click', function () { $('fixModal').classList.remove('open'); });
   $('fixConfirm').addEventListener('click', function () {
     var v = $('fixTime').value;
     if (!/^\d{2}:\d{2}$/.test(v)) { toast('اكتب وقتًا صحيحًا', 'bad'); return; }
     $('fixModal').classList.remove('open');
-    releaseCamera();
     confirmScan(v);
   });
 
