@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-<!-- AUHMC deploy version: 2026-11-07-v113 (volunteer) -->
+<!-- AUHMC deploy version: 2026-11-07-v114 (volunteer) -->
 
 <!-- ====== ANTI-CLICKJACKING (v41) ======
      Verified against the live server: /api/* responses carry
@@ -780,9 +780,28 @@
       return;
     }
     if (!navigator.onLine) {
+      /* ⚠ SAY ONLY WHAT IS TRUE.
+       *
+       * This used to read «المسح مستمر والمسحات تُحفَظ» whenever the
+       * connection dropped — and that is a promise this page keeps in
+       * ONE of its two modes. Measured with the network cut:
+       *
+       *   fast mode   → the scan is queued and really is uploaded later
+       *   normal mode → the lookup fails first, the confirm button never
+       *                 appears, and NOTHING is queued. The scan is gone.
+       *
+       * Normal mode is the default, so the bar was telling a volunteer
+       * their work was safe at exactly the moment it was being lost —
+       * «لا تكتب ان المسحات تحفظ لانها لا تحفظ».
+       *
+       * It says «لا شبكة» and nothing else, by the owner's decision: no
+       * promise, and no saved-count either. Do not add either back. The
+       * count was true, but a volunteer at a door reading anything about
+       * saving reads it as "my scans are safe", which is false in the
+       * mode they are most likely to be in. The queue still works and
+       * still uploads; it just no longer advertises itself here. */
       bar.className = 'netbar netbar--off show';
-      bar.innerHTML = '<i class="fas fa-wifi"></i> لا اتصال — المسح مستمر والمسحات تُحفَظ'
-        + (n ? ' · ' + n + ' بانتظار الرفع' : '');
+      bar.innerHTML = '<i class="fas fa-wifi"></i> لا شبكة';
       return;
     }
     if (n) {
@@ -796,7 +815,9 @@
     bar.className = 'netbar';
   }
   window.addEventListener('online',  function () { toast('عاد الاتصال', 'ok'); flushQueue(); });
-  window.addEventListener('offline', function () { toast('انقطع الاتصال — المسح مستمر', 'bad'); paintNet(); });
+  // Not «المسح مستمر»: in normal mode it does not continue. State the
+  // fact and let the bar carry the detail.
+  window.addEventListener('offline', function () { toast('انقطع الاتصال بالإنترنت', 'bad'); paintNet(); });
 
   /* ================= SETTINGS GATE ================================
    * A scan recorded against the wrong hall — or worse against NO hall,
