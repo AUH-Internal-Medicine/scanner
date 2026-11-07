@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-<!-- AUHMC deploy version: 2026-10-21-v99 (volunteer) -->
+<!-- AUHMC deploy version: 2026-11-07-v111 (volunteer) -->
 
 <!-- ====== ANTI-CLICKJACKING (v41) ======
      Verified against the live server: /api/* responses carry
@@ -245,6 +245,48 @@
   .result--ok{background:var(--okbg);border:2px solid var(--ok);}
   .result--dup{background:var(--warnbg);border:2px solid var(--warn);}
   .result--bad{background:var(--badbg);border:2px solid var(--bad);}
+
+  /* ====== THE VOLUNTEER MOMENT (v101) ======
+     Shown when a volunteer scans their own badge or a colleague's. The
+     number is the point — how many check-ins that volunteer has
+     recorded — so it is the largest thing in the box.
+
+     Teal, matching the volunteer badge colour in admin-styles.css,
+     badge.html and $palette; all four must agree. */
+  .cheer{
+    position:relative; overflow:hidden;
+    border-radius:var(--radius); padding:20px 16px 17px; text-align:center;
+    background:linear-gradient(150deg,#0b5563,#117082); color:#fff;
+    box-shadow:0 10px 28px rgba(11,85,99,.35);
+  }
+  .cheer > i{font-size:1.7rem; color:#ffd964; display:block; margin-bottom:6px;}
+  .cheer strong{display:block; font-size:1rem; font-weight:800; margin-bottom:10px;}
+  .cheer-n{
+    display:block; font-size:2.6rem; font-weight:900; line-height:1;
+    color:#ffd964; font-variant-numeric:tabular-nums;
+  }
+  .cheer-l{display:block; font-size:.8rem; opacity:.9; margin-top:2px;}
+  .cheer small{display:block; margin-top:9px; font-size:.72rem; opacity:.75;}
+  /* Confetti: twelve spans falling the height of the box. position is
+     set inline per piece (each needs its own x and delay); everything
+     shared lives here. pointer-events:none so it can never swallow a
+     tap meant for the scanner underneath. */
+  .cheer .cf{
+    position:absolute; top:-14px; width:7px; height:12px; border-radius:2px;
+    opacity:0; pointer-events:none;
+    animation:cfall 1.5s ease-in forwards;
+  }
+  @keyframes cfall{
+    0%{opacity:0; transform:translateY(-10px) rotate(0deg);}
+    12%{opacity:1;}
+    100%{opacity:0; transform:translateY(150px) rotate(420deg);}
+  }
+  @media (prefers-reduced-motion: reduce){
+    /* The spans are not emitted at all in this case (see volunteerCheer),
+       but the rule stays as a second guard: an animation that cannot be
+       switched off is the complaint this setting exists for. */
+    .cheer .cf{animation:none; display:none;}
+  }
   .r-name{font-size:1.45rem;font-weight:900;margin:0 0 4px;line-height:1.25;}
   .r-badge{font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:.9rem;color:var(--navy);
            background:rgba(0,35,102,.07);padding:2px 9px;border-radius:20px;display:inline-block;}
@@ -273,6 +315,11 @@
   .r-hist-row .fix{margin-inline-start:auto;background:none;border:1px solid var(--line);
                    border-radius:7px;padding:3px 9px;font-size:.72rem;cursor:pointer;
                    font-family:inherit;color:var(--muted);}
+  /* Shown in the button's place on a colleague's scan: who recorded it. */
+  .r-hist-row .by{margin-inline-start:auto;font-size:.7rem;color:var(--muted);opacity:.85;}
+  .res--warnstatus{background:#fff4f4;border:2px solid var(--bad);color:var(--bad);}
+  .res--warnstatus strong{display:block;}
+  .res--warnstatus span{color:var(--ink);}
 
   .hit{display:flex;align-items:center;justify-content:space-between;gap:10px;
        padding:11px;border:1px solid var(--line);border-radius:12px;margin-bottom:7px;background:#fff;}
@@ -289,6 +336,14 @@
   .mine-row:last-child{border-bottom:none;}
   .mine-time{font-family:'IBM Plex Mono',monospace;font-size:.76rem;color:var(--muted);flex-shrink:0;}
   .mine-name{flex:1;min-width:0;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  /* زرّ حذف المسحة: 36px مساحة لمس (إصبع على باب مزدحم)، والأيقونة
+     هادئة حتى تُلمَس فلا تبدو القائمة سلسلةَ تحذيرات. */
+  .mine-del{flex-shrink:0;width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;
+    border:1px solid transparent;border-radius:9px;background:transparent;cursor:pointer;
+    color:var(--muted);font-size:.85rem;transition:color .15s,background-color .15s,border-color .15s;}
+  .mine-del:hover:not(:disabled),.mine-del:focus-visible{color:#d64545;background:rgba(214,69,69,.1);
+    border-color:rgba(214,69,69,.3);outline:none;}
+  .mine-del:disabled{opacity:.45;cursor:default;}
   .pill{font-size:.67rem;font-weight:800;padding:3px 9px;border-radius:20px;flex-shrink:0;}
   .pill--in{background:var(--okbg);color:var(--ok);}
   .pill--out{background:var(--warnbg);color:var(--warn);}
@@ -517,6 +572,9 @@
      السطر الوحيد القابل للتعديل هو التالي. إن انتقل الموقع فعدِّله
      وعدِّل معه SCANNER_ORIGIN في api/index.php — الطرفان معًا أو لا
      شيء: المتصفّح يرفض الطلب إن لم يُسمِّ الخادمُ هذا النطاق.
+
+     ⚠ هذا الملف مُولَّد من 1-الموقع/volunteer.html — لا تُعدِّله هنا.
+     أي تعديل على صفحة المتطوّعين يُعاد توليد هذه النسخة بعده.
      =================================================================== -->
 <script>window.AUHMC_API = 'https://auh.edu.sy/auhmc/api';</script>
 <script src="vendor/html5-qrcode.min.js?v=2.3.8"></script>
@@ -567,6 +625,16 @@
   var $ = function (id) { return document.getElementById(id); };
   var scanner = null, lastToken = '', lastTokenAt = 0, busy = false;
   var pending = null, days = [], locations = [], editingId = null;
+  /* Who is logged in. Needed because a volunteer may correct only THEIR
+   * OWN scans (the server enforces it; this is so the button is not
+   * offered for a row that would be refused). */
+  var ME = null;
+  function isMyScan(h) {
+    if (!ME) return false;
+    var mine = String(ME.email || '').toLowerCase();
+    if (mine && String(h.scanned_by || '').toLowerCase() === mine) return true;
+    return !!(ME.id && Number(h.scanned_by_id || 0) === Number(ME.id));
+  }
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
@@ -824,7 +892,13 @@
   function fillDays(list) {
     days = (list && list.length) ? list : [];
     var sel = $('ciDay'), saved = localStorage.getItem(DAY_KEY);
-    var today = new Date().toISOString().slice(0, 10);
+    /* The DEVICE's today, not UTC's. `toISOString().slice(0,10)` is a UTC
+     * date, and Damascus is UTC+3 — so from midnight to 03:00 local it
+     * names yesterday, and the day picker would silently pre-select the
+     * wrong conference day. Same family as the scanned_at bug below. */
+    var _n = new Date();
+    var today = _n.getFullYear() + '-' + String(_n.getMonth() + 1).padStart(2, '0')
+              + '-' + String(_n.getDate()).padStart(2, '0');
     sel.innerHTML = '<option value="">— اختر —</option>' + days.map(function (d) {
       return '<option value="' + esc(d) + '">' + esc(d) + '</option>';
     }).join('');
@@ -933,8 +1007,17 @@
         + (h.direction === 'out' ? '↤ خروج' : '↦ دخول') + '</span>'
         + '<span class="t">' + esc(hhmm(h.scanned_at)) + '</span>'
         + (h.location ? '<span>' + esc(h.location) + '</span>' : '')
-        + (h.id ? '<button class="fix" data-fix="' + esc(h.id) + '" data-t="' + esc(hhmm(h.scanned_at))
-            + '" data-d="' + esc(h.direction) + '">تعديل</button>' : '')
+        /* ⚠ The button appears only on the volunteer's OWN scans. It used
+           to appear on every row of the person's history, including ones
+           other volunteers recorded — and the server accepted those,
+           which meant one mis-tap deleted a colleague's work. The server
+           refuses them now, so offering the button would only produce an
+           error message; the name of whoever did record it is shown
+           instead, which is the useful thing. */
+        + (h.id && isMyScan(h)
+            ? '<button class="fix" data-fix="' + esc(h.id) + '" data-t="' + esc(hhmm(h.scanned_at))
+              + '" data-d="' + esc(h.direction) + '">تعديل</button>'
+            : (h.scanned_by ? '<span class="by">' + esc(String(h.scanned_by).split('@')[0]) + '</span>' : ''))
         + '</div>';
     }).join('') + '</div>';
 
@@ -991,7 +1074,7 @@
       direction: direction(),
       location: $('ciLocation').value,
       activity: '', manual_in_time: '',
-      scanned_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      scanned_at: new Date().toISOString(),   // ⚠ keep the Z — see confirmScan()
       method: 'qr'
     };
     api('POST', '/checkin/record', payload).then(function (r) {
@@ -1022,13 +1105,81 @@
   /* The confirmation, shown AFTER the write. Deliberately the same colours
    * and the same duplicate wording as the normal panel -- a volunteer
    * switching modes should not have to learn a second vocabulary. */
+  /* ====== THE VOLUNTEER MOMENT (v101) ======
+   * Asked for by the owner: when a volunteer scans their own badge, or a
+   * colleague volunteer's, give them something better than the ordinary
+   * grey confirmation row.
+   *
+   * It shows the one number none of them ever sees — how many check-ins
+   * that volunteer has recorded. After six hours on a door that is the
+   * only measure of the shift, and it is sitting in the database unread.
+   *
+   * Deliberately NOT a blocking dialog: the next person is already
+   * holding out their badge. It paints over the result panel, fades on
+   * its own, and any further scan replaces it.
+   *
+   * Confetti is CSS-only — twelve absolutely-positioned spans. No
+   * library (no CDN reaches Syria), no canvas, and it is skipped
+   * entirely under prefers-reduced-motion, which on a phone held by
+   * someone who has been scanning all day is a real setting, not a
+   * checkbox exercise. */
+  function volunteerCheer(r, dir) {
+    var box = $('result');
+    if (!box) return;
+    var name = (r && r.name) || 'زميلنا';
+    var n = (r && r.volunteerScans) || 0;
+    var self = !!(r && r.isSelf);
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var bits = '';
+    if (!reduce) {
+      for (var i = 0; i < 12; i++) {
+        // Spread and timing are inline because each piece needs its own;
+        // a class per variant would be twelve classes saying one thing.
+        bits += '<span class="cf" style="left:' + (4 + i * 8) + '%;'
+             + 'animation-delay:' + (i * 70) + 'ms;'
+             + 'background:' + (i % 3 === 0 ? '#D4AF37' : (i % 3 === 1 ? '#0b5563' : '#fff')) + '"></span>';
+      }
+    }
+    box.style.display = '';
+    box.innerHTML =
+      '<div class="cheer">' + bits +
+        '<i class="fas fa-hands-clapping"></i>' +
+        '<strong>' + (self ? 'شكرًا لك يا ' : 'تحية لزميلنا ') + esc(name) + '</strong>' +
+        '<span class="cheer-n">' + n + '</span>' +
+        '<span class="cheer-l">' + (n === 1 ? 'مسحة سجّلتها' :
+             (n === 2 ? 'مسحتان سجّلتهما' :
+             (n >= 3 && n <= 10 ? 'مسحات سجّلتها' : 'مسحة سجّلتها'))) + '</span>' +
+        '<small>' + (dir === 'out' ? 'سُجّل خروجه' : 'سُجّل دخوله') + '</small>' +
+      '</div>';
+    clearTimeout(box._t);
+    box._t = setTimeout(function () { box.style.display = 'none'; }, 6000);
+  }
+
+  /* ====== A BADGE THAT IS NOT ACCEPTED (v111) ======
+   * The server records the scan either way — stranding a real person at
+   * the door over a field the volunteer cannot see would be worse — but
+   * it now says so, and this is what says it to the volunteer. Loud,
+   * sticky (no auto-dismiss), and worded as an instruction rather than a
+   * status, because the useful action is "stop them and call the
+   * organiser", not "read the word rejected". */
+  function statusBanner(r) {
+    if (!r || !r.statusWarning) return '';
+    var word = r.status === 'rejected' ? 'مرفوض'
+             : (r.status === 'pending' ? 'قيد المراجعة' : esc(r.status || 'غير مقبول'));
+    return '<div class="res res--warnstatus"><i class="fas fa-triangle-exclamation"></i>'
+         + '<div><strong>تسجيل هذا الشخص «' + word + '»</strong>'
+         + '<span>سُجّلت المسحة، لكن أوقفه وراجع المنظّم قبل الدخول.</span></div></div>';
+  }
+
   function renderFastResult(r, dir) {
     var box = $('result');
     if (!box) return;
+    // A volunteer's badge gets the moment instead of the grey row.
+    if (r && r.isVolunteer && !r.duplicate && !r.statusWarning) { volunteerCheer(r, dir); return; }
     var dup = !!(r && r.duplicate);
     var name = (r && r.name) || '';
     box.style.display = '';
-    box.innerHTML =
+    box.innerHTML = statusBanner(r) +
       '<div class="res ' + (dup ? 'res--dup' : 'res--ok') + '">' +
         '<i class="fas ' + (dup ? 'fa-circle-exclamation' : 'fa-circle-check') + '"></i>' +
         '<div><strong>' + esc(name) + '</strong>' +
@@ -1040,9 +1191,13 @@
     // Cleared on its own so the next badge meets an empty panel rather
     // than the previous person's name.
     clearTimeout(window.__fastClear);
-    window.__fastClear = setTimeout(function () {
-      if (box) { box.style.display = 'none'; box.innerHTML = ''; }
-    }, 2600);
+    // A warning stays until the next scan replaces it: it is the one
+    // message a volunteer must not miss because they looked away.
+    if (!(r && r.statusWarning)) {
+      window.__fastClear = setTimeout(function () {
+        if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+      }, 2600);
+    }
   }
 
   function lookup(tok, regId) {
@@ -1073,9 +1228,33 @@
       location: $('ciLocation').value,
       activity: '',
       manual_in_time: manualInTime || '',
-      // The time the scan ACTUALLY happened — matters when this ends up in
-      // the offline queue and is replayed minutes later.
-      scanned_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      /* The time the scan ACTUALLY happened — matters when this ends up
+       * in the offline queue and is replayed minutes later.
+       *
+       * ⚠ SEND THE WHOLE ISO STRING, WITH ITS `Z`. Do not slice it.
+       *
+       * This line used to read
+       *     new Date().toISOString().slice(0, 19).replace('T', ' ')
+       * which throws away the zone marker and leaves a bare
+       * "2026-11-10 06:18:34" — a UTC reading dressed as a local one. The
+       * server runs on Asia/Damascus, so `strtotime()` read it back as
+       * 06:18 local and EVERY SCAN WAS STORED THREE HOURS EARLY.
+       *
+       * Measured on the mirror, phone set to Asia/Damascus: device clock
+       * 12:18:34, stored scanned_at 09:18:37, while the database's own
+       * created_at (which the client cannot touch) said 12:18:37.
+       *
+       * What that cost on screen: «داخل القاعة الآن منذ ٣ ساعات» for
+       * someone who had just walked in, a 09:00 session printed as 06:00
+       * on the attendance sheet, and a zero-minute stay whenever a
+       * volunteer typed the missed entry time by hand — because a typed
+       * "09:30" is local and the exit was three hours behind it, so the
+       * duration came out negative and was clamped to zero.
+       *
+       * With the `Z` kept, strtotime() converts to the server's zone and
+       * a phone on any timezone — a visiting speaker's, for instance —
+       * still records the correct instant. */
+      scanned_at: new Date().toISOString(),
       method: pending.token ? 'qr' : 'manual'
     };
     var label = pending.name + ' · ' + (payload.direction === 'out' ? 'خروج' : 'دخول');
@@ -1102,10 +1281,19 @@
         if (btn) { btn.disabled = false; btn.innerHTML = 'إعادة المحاولة'; }
         return;
       }
+      if (r.statusWarning) {
+        var rb = $('result');
+        if (rb) { rb.style.display = ''; rb.innerHTML = statusBanner(r) + rb.innerHTML; }
+        toast('انتبه: تسجيل هذا الشخص غير مقبول — راجع المنظّم', 'bad');
+      }
       if (r.duplicate) toast('مُسجَّل قبل قليل (' + hhmm(r.scannedAt) + ') — لم يُسجَّل مرتين', 'bad');
       else if (r.direction === 'out') toast('خروج ' + r.name + (r.durationMinutes != null ? ' · ' + fmtMin(r.durationMinutes) : ''), 'ok');
       else toast('دخول ' + r.name, 'ok');
       signal(true);
+      // v101: the confirm-tap flow gets the volunteer moment too —
+      // otherwise the surprise would depend on which scanning mode the
+      // volunteer happened to be in, which is not a reason for it.
+      if (r.isVolunteer && !r.duplicate) { volunteerCheer(r, r.direction); pending = null; lastToken = ''; loadMine(); return; }
       $('result').style.display = 'none';
       pending = null; lastToken = '';
       loadMine();
@@ -1576,23 +1764,69 @@
       }
       var list = r.scans || [];
       $('mineCount').textContent = list.length ? (list.length + ' مسحة') : '';
+      /* زرّ حذف بجانب كل مسحة من مسوحاتي.
+       * المسح الخاطئ يحدث: الاتجاه الخطأ، أو الشخص نفسه مرّتين، أو بطاقة
+       * مُسحت قبل أن يصل صاحبها. وقبل هذا كان على المتطوّع أن ينادي
+       * المنظّم ليحذفها من اللوحة، والباب مزدحم.
+       *
+       * مَن يقرّر الظهور هو الخادم عبر canDelete، لا حسابٌ محلّي: ساعة
+       * الهاتف قد تكون مضبوطة خطأً، وكل مسحة تُختم بيومٍ من أيام المؤتمر
+       * لا بتاريخ اليوم — فحسابُ "هل هذا اليوم؟" على الجهاز كان يُخفي
+       * الزرّ في البروفات ويُظهره حيث يرفضه الخادم. */
       box._serverHtml = !list.length ? '<p class="empty">لا مسوحات بعد.</p>' : list.map(function (s) {
+        var canDel = !!s.canDelete;
         return '<div class="mine-row">'
           + '<span class="mine-time">' + esc(hhmm(s.scannedAt)) + '</span>'
           + '<span class="mine-name">' + esc(s.name) + '</span>'
           + (s.location ? '<span class="mine-time">' + esc(s.location) + '</span>' : '')
           + '<span class="pill pill--' + (s.direction === 'out' ? 'out' : 'in') + '">'
-          + (s.direction === 'out' ? 'خروج' : 'دخول') + '</span></div>';
+          + (s.direction === 'out' ? 'خروج' : 'دخول') + '</span>'
+          + (canDel
+              ? '<button class="mine-del" title="حذف هذه المسحة" aria-label="حذف هذه المسحة"'
+                + ' data-del="' + esc(s.id) + '"'
+                + ' data-who="' + esc(s.name) + '"'
+                + ' data-at="' + esc(hhmm(s.scannedAt)) + '"'
+                + ' data-dir="' + (s.direction === 'out' ? 'خروج' : 'دخول') + '">'
+                + '<i class="fas fa-trash-can"></i></button>'
+              : '')
+          + '</div>';
       }).join('');
       renderMineLocal();
+      bindMineDelete();
     });
   }
+  /* يُربط بعد كل رسم: renderMineLocal يعيد بناء القائمة، فأي مستمع
+   * قديم يذهب مع العناصر التي حُذفت. */
+  function bindMineDelete() {
+    var box = $('mineList');
+    if (!box) return;
+    Array.prototype.forEach.call(box.querySelectorAll('[data-del]'), function (b) {
+      b.addEventListener('click', function () {
+        var who = b.getAttribute('data-who') || '';
+        var at  = b.getAttribute('data-at') || '';
+        var dir = b.getAttribute('data-dir') || '';
+        if (!confirm('حذف مسحة «' + dir + '» للساعة ' + at + '\n' + who
+                     + '\n\nلا يمكن التراجع.')) return;
+        b.disabled = true;
+        api('POST', '/checkin/adjust', { id: Number(b.getAttribute('data-del')), action: 'delete' })
+          .then(function (r) {
+            if (r && r.error) { b.disabled = false; toast(r.error, 'bad'); return; }
+            toast('حُذفت المسحة', 'ok');
+            if (pending) lookup(pending.token, pending.id);
+            loadMine();
+          })
+          .catch(function () { b.disabled = false; toast('تعذّر الحذف — تحقّق من الاتصال', 'bad'); });
+      });
+    });
+  }
+
   $('mineRefresh').addEventListener('click', function () { flushQueue(true).then(loadMine); });
 
   // ---- boot --------------------------------------------------------
   function start(user) {
     $('loginView').style.display = 'none';
     $('appView').style.display = '';
+    ME = user || null;
     $('whoName').textContent = (user && user.name) || '';
     // API_ROOT, not APP_BASE: this is the ONE fetch that did not go
     // through the api() helper, so when the scanner is hosted on another
