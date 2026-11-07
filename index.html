@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-<!-- AUHMC deploy version: 2026-11-07-v112 (volunteer) -->
+<!-- AUHMC deploy version: 2026-11-07-v113 (volunteer) -->
 
 <!-- ====== ANTI-CLICKJACKING (v41) ======
      Verified against the live server: /api/* responses carry
@@ -532,6 +532,7 @@
     <p class="hint" style="margin-top:0;" id="fixWhy"></p>
     <label for="fixTime" style="margin-top:11px;">وقت الدخول التقريبي</label>
     <input type="time" id="fixTime" dir="ltr">
+    <p class="hint" id="fixEcho" style="margin:6px 0 0;font-weight:600;"></p>
     <button class="btn btn--ok" id="fixConfirm"><i class="fas fa-check"></i> سجّل الدخول والخروج معًا</button>
     <button class="btn btn--ghost btn--sm" id="fixCancel">إلغاء</button>
   </div>
@@ -561,6 +562,7 @@
      never initialises and check-in falls back to typing names by hand for
      every attendee. Verified against the SRI hash this tag used to carry;
      ?v is the library version, not the deploy stamp (see the icons tag). -->
+<script src="vendor/html5-qrcode.min.js?v=2.3.8"></script>
 <!-- ===================================================================
      نسخة الماسح المستضافة خارج الموقع (GitHub Pages)
      سببها واحد: خادم المشفى يُلحق بكل رد ترويسة تمنع الكاميرا،
@@ -574,10 +576,9 @@
      شيء: المتصفّح يرفض الطلب إن لم يُسمِّ الخادمُ هذا النطاق.
 
      ⚠ هذا الملف مُولَّد من 1-الموقع/volunteer.html — لا تُعدِّله هنا.
-     أي تعديل على صفحة المتطوّعين يُعاد توليد هذه النسخة بعده.
+     أعد توليده بـ 5-أدوات/توليد-الماسح.command بعد أي تعديل هناك.
      =================================================================== -->
 <script>window.AUHMC_API = 'https://auh.edu.sy/auhmc/api';</script>
-<script src="vendor/html5-qrcode.min.js?v=2.3.8"></script>
 <script>
 (function () {
   'use strict';
@@ -625,6 +626,19 @@
   var $ = function (id) { return document.getElementById(id); };
   var scanner = null, lastToken = '', lastTokenAt = 0, busy = false;
   var pending = null, days = [], locations = [], editingId = null;
+  /* Shut only while a question is on screen waiting for the volunteer —
+   * never merely because a request is in flight. See fastRecord(). */
+  var dialogOpen = false, dialogTimer = null;
+  /* ⚠ Always through these two. A gate that stops the camera MUST have
+   * exactly one way in and one way out, and a timeout — a volunteer who
+   * walks away from an unanswered question must not leave the door dead
+   * for the next person. 45s is long enough to read and decide. */
+  function holdCamera() {
+    dialogOpen = true;
+    clearTimeout(dialogTimer);
+    dialogTimer = setTimeout(function () { dialogOpen = false; }, 45000);
+  }
+  function releaseCamera() { dialogOpen = false; clearTimeout(dialogTimer); }
   /* Who is logged in. Needed because a volunteer may correct only THEIR
    * OWN scans (the server enforces it; this is so the button is not
    * offered for a row that would be refused). */
@@ -680,6 +694,36 @@
   }
   function buzz(ok) { try { if (navigator.vibrate) navigator.vibrate(ok ? 55 : [45,60,45]); } catch (e) {} }
   function signal(ok) { flash(ok); beep(ok); buzz(ok); }
+
+  /* ====== "I READ IT" — the instant acknowledgement (v113) ======
+   *
+   * The owner reported lag in the camera. The decoder is not the slow
+   * part: it already hands decoding to the browser's native
+   * BarcodeDetector at 25fps with the flipped pass disabled. What was
+   * slow was the ANSWER — every flash, beep and buzz waited for the
+   * server, so on venue wifi the volunteer held the phone over a badge
+   * that had been read half a second earlier and saw nothing at all.
+   *
+   * A scan now acknowledges itself the moment the code is decoded: a
+   * short, quiet, high tick that cannot be mistaken for the success tone
+   * that follows. The volunteer moves to the next person immediately and
+   * the result lands when it lands. */
+  function tick() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.connect(g); g.connect(audioCtx.destination);
+      o.type = 'square'; o.frequency.value = 1500;
+      g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.12, audioCtx.currentTime + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.05);
+      o.start(); o.stop(audioCtx.currentTime + 0.06);
+    } catch (e) {}
+    try { if (navigator.vibrate) navigator.vibrate(18); } catch (e) {}
+    var f = $('flash');
+    if (f) { f.className = 'flash on'; setTimeout(function () { f.className = 'flash'; }, 70); }
+  }
 
   function token() { return localStorage.getItem(TOKEN_KEY); }
   function direction() { return $('dirOut').checked ? 'out' : 'in'; }
@@ -960,7 +1004,18 @@
 
     // Replay the day to find the open session and who opened it.
     var open = null;
-    hist.forEach(function (h) { open = (h.direction === 'in') ? h : null; });
+    /* ⚠ The SAME rule the server's pairSessions() uses, and for the same
+     * reason: a second entry while one is open is the same arrival
+     * scanned again, so the session keeps its ORIGINAL start. Writing
+     * `open = h` on every `in` made this panel show the accidental scan's
+     * time — «داخل القاعة الآن منذ دقيقة» for someone who had been there
+     * an hour — even after the server was fixed. A marked re-entry
+     * ([re], written only by the server) does start a new session. */
+    hist.forEach(function (h) {
+      if (h.direction !== 'in') { open = null; return; }
+      var reentry = String(h.note || '').indexOf('[re]') === 0;
+      if (!open || reentry) open = h;
+    });
 
     var state, suggest = '';
     if (open) {
@@ -1065,9 +1120,17 @@
    * `needsManualIn` (an exit with no matching entry) still has to stop and
    * ask, so that one case falls back to the normal dialog. */
   function fastRecord(tok) {
-    if (busy) return;
+    /* ⚠ The gate is `dialogOpen`, NOT "a request is in flight".
+     *
+     * `busy` was held for the whole round trip, so while one scan waited
+     * on the network the camera ignored every other badge — which is
+     * exactly the lag the owner felt. Different people are independent
+     * rows and the server serialises per person, so the queue has no
+     * reason to wait for the wire. The same badge twice is still
+     * blocked, by the token+4s guard in the decode callback. */
+    if (dialogOpen) return;
     if (!settingsReady()) { toast('اختر اليوم والقاعة أولًا', 'bad'); return; }
-    busy = true;
+    tick();                    // read — before anything touches the network
     var payload = {
       token: tok, registration_id: 0,
       conf_day: $('ciDay').value,
@@ -1078,7 +1141,6 @@
       method: 'qr'
     };
     api('POST', '/checkin/record', payload).then(function (r) {
-      busy = false;
       if (r && r.offline) {
         // The queue already replays these, so a dead network costs nothing
         // but a later upload -- the volunteer keeps scanning.
@@ -1090,12 +1152,23 @@
       }
       if (r && r.needsManualIn) {
         // Cannot be decided without a human: fall back to the full flow.
+        holdCamera();
         pending = { token: tok, name: r.name || '', id: 0 };
-        openFix(r.name || '');
+        openFix(r.name || '', hhmm(r.outAt || ''));
         signal(false);
         return;
       }
       if (r && r.error) { toast(r.error, 'bad'); signal(false); return; }
+      if (r && r.alreadyIn) {
+        // Fast mode never calls lookup, so this warning is the ONLY
+        // thing standing between a repeat badge and a silent second row.
+        // The gate stays shut until the volunteer answers: a decision is
+        // pending and the next badge must not scroll it away.
+        holdCamera();
+        alreadyInPanel(r, payload);
+        signal(false);
+        return;
+      }
       signal(true);
       renderFastResult(r, payload.direction);
       loadMine();
@@ -1169,6 +1242,85 @@
     return '<div class="res res--warnstatus"><i class="fas fa-triangle-exclamation"></i>'
          + '<div><strong>تسجيل هذا الشخص «' + word + '»</strong>'
          + '<span>سُجّلت المسحة، لكن أوقفه وراجع المنظّم قبل الدخول.</span></div></div>';
+  }
+
+  /* ====== ALREADY INSIDE (v112) ======
+   * Shown whenever the server refuses a second entry for someone who
+   * never scanned out. It names the time they came in — the question
+   * the volunteer actually has — and offers the one legitimate way
+   * past it: the person left without scanning and has come back.
+   *
+   * Sticky: no auto-dismiss, because a decision is waiting on it. */
+  var forcePending = null;
+  function alreadyInPanel(r, payload) {
+    var box = $('result');
+    if (!box) return;
+    forcePending = payload || null;
+    box.style.display = '';
+    box.innerHTML =
+      '<div class="res res--warnstatus"><i class="fas fa-circle-exclamation"></i>' +
+        '<div><strong>' + esc(r.name || '') + ' ما زال مُسجَّلًا دخولًا منذ ' + esc(hhmm(r.checkedInAt))
+          + ' — هل تقصد تسجيل خروج؟</strong>' +
+        // Below a minute there is no "since" worth printing — «منذ ٠ دقيقة»
+        // reads as a glitch next to a time that is clearly just now.
+        '<span>' + (r.sinceMinutes >= 1 ? 'داخل القاعة منذ ' + fmtMin(r.sinceMinutes) : 'سُجّل دخوله للتوّ') +
+          (r.location ? ' · ' + esc(r.location) : '') +
+          '<br>لم يُسجَّل دخولٌ ثانٍ، ووقت دخوله الأصلي محفوظ كما هو.</span></div>' +
+      '</div>' +
+      /* The FIRST button is the one the volunteer almost always meant.
+       *
+       * The owner's case, word for word: someone who had been inside for
+       * an hour came to leave, the volunteer was still on «دخول», and
+       * pressed it. Offering only «سجّل دخولًا جديدًا» answers a question
+       * nobody asked. The useful question is «هل تقصد تسجيل خروج؟», and
+       * the answer has to be one tap — the person is standing there. */
+      (forcePending
+        ? '<button class="btn btn--warn" id="makeOutBtn">'
+          + '<i class="fas fa-right-from-bracket"></i> نعم، سجّل خروجًا الآن</button>'
+          + '<button class="btn btn--ghost btn--sm" id="forceInBtn">'
+          + 'لا — خرج دون مسح وعاد الآن، سجّل دخولًا جديدًا</button>'
+          + '<button class="btn btn--ghost btn--sm" id="dismissWarnBtn">تجاهل وتابع المسح</button>'
+        : '');
+
+    var db = $('dismissWarnBtn');
+    if (db) db.addEventListener('click', function () {
+      releaseCamera(); forcePending = null;
+      box.style.display = 'none'; box.innerHTML = '';
+      pending = null; lastToken = '';
+    });
+
+    var ob = $('makeOutBtn');
+    if (ob) ob.addEventListener('click', function () {
+      ob.disabled = true;
+      var p = JSON.parse(JSON.stringify(forcePending));
+      p.direction = 'out';
+      p.scanned_at = new Date().toISOString();
+      api('POST', '/checkin/record', p).then(function (rr) {
+        if (rr && rr.error) { ob.disabled = false; toast(rr.error, 'bad'); return; }
+        if (rr && rr.needsManualIn) { openFix(rr.name || '', hhmm(rr.outAt || '')); return; }
+        forcePending = null; releaseCamera();
+        toast('خروج ' + (rr.name || '') + (rr.durationMinutes != null ? ' · ' + fmtMin(rr.durationMinutes) : ''), 'ok');
+        box.style.display = 'none'; box.innerHTML = '';
+        pending = null; lastToken = '';
+        loadMine();
+      });
+    });
+
+    var fb = $('forceInBtn');
+    if (fb) fb.addEventListener('click', function () {
+      if (!confirm('سيُفتح تسجيل دخولٍ جديد، ويبقى الدخول السابق بلا خروج.\n\nمتأكّد؟')) return;
+      fb.disabled = true;
+      var p = forcePending; forcePending = null;
+      p.force = true;
+      api('POST', '/checkin/record', p).then(function (rr) {
+        releaseCamera();
+        if (rr && rr.error) { toast(rr.error, 'bad'); return; }
+        toast('سُجّل دخولٌ جديد لـ' + (rr.name || ''), 'ok');
+        box.style.display = 'none'; box.innerHTML = '';
+        pending = null; lastToken = '';
+        loadMine();
+      });
+    });
   }
 
   function renderFastResult(r, dir) {
@@ -1272,7 +1424,13 @@
       }
       if (r && r.needsManualIn) {
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> تأكيد الخروج'; }
-        openFix(r.name || (pending && pending.name) || '');
+        openFix(r.name || (pending && pending.name) || '', hhmm(r.outAt || ''));
+        signal(false);
+        return;
+      }
+      if (r && r.alreadyIn) {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> تأكيد الدخول'; }
+        alreadyInPanel(r, payload);
         signal(false);
         return;
       }
@@ -1301,19 +1459,46 @@
   }
 
   // ---- missing check-in correction ----------------------------------
-  function openFix(name) {
+  /* ⚠ `<input type="time">` ALWAYS hands back 24-hour "HH:MM", but it
+   * DISPLAYS in the phone's locale — so an Arabic or US phone shows the
+   * volunteer «٠٢:٠٠ م» while every time on this page, and every time in
+   * the database, is written 14:00. The owner hit exactly that mismatch.
+   *
+   * The input cannot be forced to a 24-hour face (no browser honours a
+   * request to), so the page states the chosen value in the same 24-hour
+   * form it will be stored in, live, under the field. Reading back what
+   * you are about to save removes the ambiguity the widget creates. */
+  function fixReadback() {
+    var v = $('fixTime').value, el = $('fixEcho');
+    if (!el) return;
+    el.textContent = /^\d{2}:\d{2}$/.test(v) ? 'سيُسجَّل الدخول الساعة ' + v + ' (نظام ٢٤ ساعة)' : '';
+  }
+  function openFix(name, outAt) {
     $('fixWhy').innerHTML = '<b>' + esc(name) + '</b> ليس لديه تسجيل دخول اليوم، '
       + 'فلا يمكن تسجيل خروج بلا دخول (وإلا صارت مدّة حضوره مجهولة).<br>'
-      + 'اسأله متى دخل تقريبًا واكتب الوقت — سيُسجَّل الدخول والخروج معًا.';
-    var d = new Date(); d.setHours(d.getHours() - 1);
-    $('fixTime').value = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+      + 'اسأله متى دخل تقريبًا واكتب الوقت — سيُسجَّل الدخول والخروج معًا.'
+      + (outAt ? '<br><b>الخروج سيُسجَّل الساعة ' + esc(outAt) + '</b> — اكتب وقتًا أبكر منه.' : '');
+    /* Default: an hour before the EXIT being recorded, not an hour before
+     * now. On a rehearsal day those are different, and "an hour before
+     * now" produced a time that sits after the exit. */
+    var base = null;
+    if (/^\d{2}:\d{2}$/.test(outAt || '')) {
+      var hm = outAt.split(':');
+      base = new Date(); base.setHours(Number(hm[0]), Number(hm[1]), 0, 0);
+    } else { base = new Date(); }
+    base.setHours(base.getHours() - 1);
+    $('fixTime').value = String(base.getHours()).padStart(2,'0') + ':' + String(base.getMinutes()).padStart(2,'0');
+    fixReadback();
     $('fixModal').classList.add('open');
   }
-  $('fixCancel').addEventListener('click', function () { $('fixModal').classList.remove('open'); });
+  $('fixTime').addEventListener('input', fixReadback);
+  $('fixTime').addEventListener('change', fixReadback);
+  $('fixCancel').addEventListener('click', function () { $('fixModal').classList.remove('open'); releaseCamera(); });
   $('fixConfirm').addEventListener('click', function () {
     var v = $('fixTime').value;
     if (!/^\d{2}:\d{2}$/.test(v)) { toast('اكتب وقتًا صحيحًا', 'bad'); return; }
     $('fixModal').classList.remove('open');
+    releaseCamera();
     confirmScan(v);
   });
 
@@ -1700,16 +1885,30 @@
 
   // ---- search + live status -----------------------------------------
   var searchTimer = null;
-  $('searchBox').addEventListener('input', function () {
-    clearTimeout(searchTimer);
-    var q = this.value.trim();
+  /* ====== LIVE SEARCH (v112) ======
+   * The result rows carry live state — «داخل الآن منذ ١٠:٤٠» / «خرج» —
+   * and a volunteer leaves a name on screen while they deal with the
+   * person in front of them. Without a refresh those chips are a
+   * snapshot from whenever they stopped typing, and a colleague at
+   * another door changes the truth underneath them.
+   *
+   * So the last query re-runs on a timer. Three rules keep it cheap and
+   * out of the way:
+   *   - only while the search box still holds that query
+   *   - only while the tab is actually visible (a phone in a pocket
+   *     must not poll)
+   *   - never while a result is open for confirmation, so the list
+   *     cannot rearrange under a thumb that is reaching for «اختيار»
+   */
+  var searchLast = '', searchPoll = null;
+  function runSearch(q, silent) {
     var box = $('searchResults');
-    if (q.length < 2) { box.innerHTML = ''; return; }
-    searchTimer = setTimeout(function () {
-      api('GET', '/checkin/search?q=' + encodeURIComponent(q)
-          + '&day=' + encodeURIComponent($('ciDay').value || '')).then(function (r) {
-        var list = (r && r.results) || [];
-        if (!list.length) { box.innerHTML = '<p class="hint">لا نتائج. تأكّد أن الشخص مقبول.</p>'; return; }
+    if (!box) return;
+    api('GET', '/checkin/search?q=' + encodeURIComponent(q)
+        + '&day=' + encodeURIComponent($('ciDay').value || '')).then(function (r) {
+      var list = (r && r.results) || [];
+      if (r && r.offline) { if (!silent) box.innerHTML = '<p class="hint">لا اتصال — تعذّر البحث.</p>'; return; }
+      if (!list.length) { box.innerHTML = '<p class="hint">لا نتائج. تأكّد أن الشخص مقبول.</p>'; return; }
         var more = (r.total && r.total > list.length)
           ? '<p class="hint">يُعرض ' + list.length + ' من ' + r.total + ' — اكتب المزيد لتضييق البحث.</p>' : '';
         box.innerHTML = list.map(function (p, i) {
@@ -1736,11 +1935,41 @@
             var p = list[parseInt(b.getAttribute('data-i'), 10)];
             // Resolved by row id: the search endpoint does not hand out
             // check-in tokens (v37).
+            stopSearchPoll();
             lookup(null, p.id);
           });
         });
-      });
+    });
+  }
+
+  function stopSearchPoll() { if (searchPoll) { clearInterval(searchPoll); searchPoll = null; } }
+  function startSearchPoll() {
+    stopSearchPoll();
+    searchPoll = setInterval(function () {
+      var q = ($('searchBox').value || '').trim();
+      if (q.length < 2 || q !== searchLast) { stopSearchPoll(); return; }
+      if (document.hidden) return;        // asleep in a pocket: skip the tick
+      if (pending) return;                // a card is open; do not reshuffle
+      runSearch(q, true);
+    }, 12000);
+  }
+
+  $('searchBox').addEventListener('input', function () {
+    clearTimeout(searchTimer);
+    var q = this.value.trim();
+    var box = $('searchResults');
+    searchLast = q;
+    if (q.length < 2) { box.innerHTML = ''; stopSearchPoll(); return; }
+    searchTimer = setTimeout(function () {
+      runSearch(q, false);
+      startSearchPoll();
     }, 240);
+  });
+  // A tab coming back to the front is the moment the list is most stale.
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden || pending) return;
+    var q = ($('searchBox').value || '').trim();
+    if (q.length >= 2 && q === searchLast) runSearch(q, true);
   });
 
   // ---- my recent scans ----------------------------------------------
